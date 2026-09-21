@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "type": "ping.request",
+  "sent_at": "2026-09-21T10:00:00Z",
+  "payload": {
+    "nonce": "tracer-bullet-01"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thresh.dev/contract/ping-pair.schema.json",
+  "title": "Thresh ping request/response payloads",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/ping_request" },
+    { "$ref": "#/$defs/ping_response" }
+  ],
+  "$defs": {
+    "ping_request": {
+      "type": "object",
+      "description": "Sent backend→agent to prove the sidecar is alive and speaking the contract.",
+      "required": ["nonce"],
+      "additionalProperties": false,
+      "properties": {
+        "nonce": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque value echoed back by the agent"
+        }
+      }
+    },
+    "ping_response": {
+      "type": "object",
+      "description": "Agent's answer to a ping.request; also carries the agent's version banner.",
+      "required": ["nonce", "pong", "agent_version"],
+      "additionalProperties": false,
+      "properties": {
+        "nonce": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pong": {
+          "type": "boolean",
+          "const": true
+        },
+          "agent_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

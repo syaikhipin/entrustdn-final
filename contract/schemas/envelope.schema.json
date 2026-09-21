@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thresh.dev/contract/envelope.schema.json",
+  "title": "Thresh Go-Agent message envelope",
+  "type": "object",
+  "description": "Envelope every backend↔agent message rides in. The type field selects the payload schema.",
+  "required": ["version", "type", "sent_at", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Contract version. Bump on breaking change; both sides reject other versions."
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Message type, e.g. ping.request, ping.response, request.lifecycle, channel.reply"
+    },
+    "sent_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}

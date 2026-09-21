@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] `backend/` Go service serves a health/status endpoint; table-driven tests drive it at the HTTP boundary
 - [ ] `agent/` Python/LangGraph service consumes and answers one typed contract message from the backend
@@ -14,3 +14,7 @@
 - [ ] Postgres reachable via env config (ADR 0007); migrations/generation path established
 - [ ] All three services boot from one command (compose/justfile/Makefile)
 - [ ] CI-green: `go test -race ./...` and the agent/web suites pass
+
+## Comments
+
+- 2026-09-22: Claimed by agent. Implementation complete, staged for review: contract/ (envelope + ping pair schemas, golden fixtures), backend/ (status API at /api/v1/status with contract-fake agent tests, env config, embedded Postgres migrations, dev log mail sink), agent/ (FastAPI + LangGraph ping node, Pydantic contract pinned to fixtures, FakeChannel harness, in-process MCP fake memory provider), web/ (Nuxt status page + vitest). One-command boot via `make dev` (docker Postgres + three services); verified live round trip. CI workflow added (.github/workflows/ci.yml). Local suites: 35 Go (incl. live-Postgres), 18 Python, 3 web tests, all green.

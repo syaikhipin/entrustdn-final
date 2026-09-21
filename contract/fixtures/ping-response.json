@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "type": "ping.response",
+  "sent_at": "2026-09-21T10:00:01Z",
+  "payload": {
+    "nonce": "tracer-bullet-01",
+    "pong": true,
+    "agent_version": "0.1.0"
+  }
+}
