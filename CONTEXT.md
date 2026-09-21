@@ -1,4 +1,6 @@
-# Agentic Agricultural Data Sharing Platform
+# Thresh
+
+*(Thresh — the agentic agricultural data-sharing platform.)*
 
 A membership platform where Farmer Organizations share and sell agricultural data, and Data Consumers commission new data gathered from farmers by an AI agent. MCP is its connection fabric, and memory comes from pluggable external Memory Providers in the Hermes Agent style. It shares themes with the PhD thesis "Iterative Memory Routing for Agentic Agricultural Data Sharing with an MCP-Enabled Trust Layer", whose algorithm could later be connected as one more Memory Provider.
 

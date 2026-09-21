@@ -1,4 +1,6 @@
-# Agentic Agricultural Data Sharing Platform
+# Thresh
+
+Agentic agricultural data-sharing platform.
 
 Go backend + Python LangGraph agent sidecar + Nuxt.js frontend, monorepo
 (`backend/`, `agent/`, `web/`). Domain glossary in `CONTEXT.md`; decisions in

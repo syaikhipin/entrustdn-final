@@ -1,4 +1,4 @@
-# Spec: Agentic Agricultural Data Sharing Platform — v1
+# Spec: Thresh — Agentic Agricultural Data Sharing Platform (v1)
 
 Status: ready-for-agent
 Tracker: local markdown, `.scratch/platform-v1/`
