@@ -1,0 +1,17 @@
+env files
+.env
+.env.*
+!.env.example
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+dist/
+.nuxt/
+.output/
+coverage/
+.DS_Store
+bin/
+tmp/
+scratch notes
+.scratch/*/notes/
