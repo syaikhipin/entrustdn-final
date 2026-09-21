@@ -132,6 +132,66 @@ func TestStatusReportsDegradedWhenAgentDown(t *testing.T) {
 	}
 }
 
+func TestStatusAllowsBrowserCrossOriginFetch(t *testing.T) {
+	// The web app (localhost:3000) fetches the backend (localhost:8080) from
+	// the browser: a cross-origin request the backend must explicitly allow,
+	// or the page shows "Failed to fetch". These cases pin the CORS surface.
+	tests := []struct {
+		name            string
+		origin          string
+		method          string
+		wantAllowed     bool
+		wantAllowOrigin string
+	}{
+		{
+			name:            "GET from the dev web origin",
+			origin:          "http://localhost:3000",
+			method:          http.MethodGet,
+			wantAllowed:     true,
+			wantAllowOrigin: "http://localhost:3000",
+		},
+		{
+			name:        "GET from an unknown origin",
+			origin:      "http://evil.example.com",
+			method:      http.MethodGet,
+			wantAllowed: true,
+			// status is public and readable, but no ACAO header for strangers
+			wantAllowOrigin: "",
+		},
+		{
+			name:            "preflight for POST from the dev web origin",
+			origin:          "http://localhost:3000",
+			method:          http.MethodOptions,
+			wantAllowed:     true,
+			wantAllowOrigin: "http://localhost:3000",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := fakeAgent(t, "0.1.0")
+			srv := httptest.NewServer(api.NewHandler(agentclient.New(agent.URL), "test-backend"))
+			defer srv.Close()
+
+			req, _ := http.NewRequest(tt.method, srv.URL+"/api/v1/status", nil)
+			req.Header.Set("Origin", tt.origin)
+			if tt.method == http.MethodOptions {
+				req.Header.Set("Access-Control-Request-Method", "POST")
+				req.Header.Set("Access-Control-Request-Headers", "content-type")
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("%s: %v", tt.method, err)
+			}
+			defer resp.Body.Close()
+
+			got := resp.Header.Get("Access-Control-Allow-Origin")
+			if got != tt.wantAllowOrigin {
+				t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, tt.wantAllowOrigin)
+			}
+		})
+	}
+}
+
 func TestStatusIsJSONAndGETOnly(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -28,6 +28,13 @@ type Handler struct {
 	mux     *http.ServeMux
 }
 
+// allowedOrigins lists the browser origins allowed to call this API across
+// origins. Dev default covers the Nuxt dev server; production origins get
+// added via config as deployment lands.
+var allowedOrigins = map[string]bool{
+	"http://localhost:3000": true,
+}
+
 // NewHandler wires routes and returns the backend's HTTP handler.
 func NewHandler(agent Pinger, version string) http.Handler {
 	h := &Handler{
@@ -36,7 +43,11 @@ func NewHandler(agent Pinger, version string) http.Handler {
 		mux:     http.NewServeMux(),
 	}
 	h.mux.HandleFunc("GET /api/v1/status", h.handleStatus)
-	return h
+	h.mux.HandleFunc("POST /api/v1/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	})
+	return withCORS(h.mux)
 }
 
 // ServeHTTP implements http.Handler.
@@ -88,6 +99,27 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		log.Printf("api: failed to encode status response: %v", err)
 	}
+}
+
+// withCORS wraps a handler with the browser cross-origin policy: known
+// origins get Access-Control-Allow-Origin on every response, and preflight
+// (OPTIONS) requests are answered directly. Unknown origins get no CORS
+// headers, so browsers block them.
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" && allowedOrigins[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		}
+		if r.Method == http.MethodOptions && origin != "" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // newNonce returns a random hex string for ping requests.
