@@ -78,7 +78,7 @@ func TestStatusReportsHealthyWhenAgentAnswers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			agent := fakeAgent(t, tt.agentVersion)
-			srv := httptest.NewServer(api.NewHandler(agentclient.New(agent.URL), "test-backend"))
+			srv := httptest.NewServer(api.NewHandler(api.Deps{Agent: agentclient.New(agent.URL), Version: "test-backend"}))
 			defer srv.Close()
 
 			code, doc := getStatus(t, srv)
@@ -113,7 +113,7 @@ func TestStatusReportsDegradedWhenAgentDown(t *testing.T) {
 	agent := fakeAgent(t, "0.1.0")
 	agent.Close()
 
-	srv := httptest.NewServer(api.NewHandler(agentclient.New(agent.URL), "test-backend"))
+	srv := httptest.NewServer(api.NewHandler(api.Deps{Agent: agentclient.New(agent.URL), Version: "test-backend"}))
 	defer srv.Close()
 
 	code, doc := getStatus(t, srv)
@@ -169,7 +169,7 @@ func TestStatusAllowsBrowserCrossOriginFetch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			agent := fakeAgent(t, "0.1.0")
-			srv := httptest.NewServer(api.NewHandler(agentclient.New(agent.URL), "test-backend"))
+			srv := httptest.NewServer(api.NewHandler(api.Deps{Agent: agentclient.New(agent.URL), Version: "test-backend"}))
 			defer srv.Close()
 
 			req, _ := http.NewRequest(tt.method, srv.URL+"/api/v1/status", nil)
@@ -204,7 +204,7 @@ func TestStatusIsJSONAndGETOnly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			agent := fakeAgent(t, "0.1.0")
-			srv := httptest.NewServer(api.NewHandler(agentclient.New(agent.URL), "test-backend"))
+			srv := httptest.NewServer(api.NewHandler(api.Deps{Agent: agentclient.New(agent.URL), Version: "test-backend"}))
 			defer srv.Close()
 
 			req, _ := http.NewRequest(tt.method, srv.URL+"/api/v1/status", nil)

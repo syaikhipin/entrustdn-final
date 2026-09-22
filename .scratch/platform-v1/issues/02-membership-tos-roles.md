@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 (Monorepo skeleton & tracer bullet).
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 - [ ] Registration with email verification; verification link lands in the dev log sink
 - [ ] TOS is versioned; the accepted version (and timestamp) is recorded per account; publishing a new version requires re-acceptance at next login

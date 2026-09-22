@@ -1,109 +1,205 @@
 <script setup lang="ts">
-const config = useRuntimeConfig();
-const backendURL =
-  config.public.backendBaseURL || "http://localhost:8080";
+// App shell: shared chrome around every page. NuxtPage carries the routes
+// (index, register, login, verify, homes, admin).
+const { account, restore, signOut } = useSession();
 
-const status = ref<import("./status").BackendStatus | null>(null);
-const error = ref<string | null>(null);
-
-onMounted(async () => {
-  try {
-    const { fetchStatus } = await import("./status");
-    status.value = await fetchStatus(backendURL);
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
-  }
+onMounted(() => {
+  restore();
 });
+
+const backendURL = useBackendURL();
+
+async function logout() {
+  const { token } = useSession();
+  try {
+    if (token.value) await (await import("~/auth")).logout(backendURL, token.value);
+  } catch {
+    // The local session ends regardless.
+  }
+  signOut();
+  navigateTo("/");
+}
 </script>
 
 <template>
-  <main class="wrap">
-    <h1>Thresh</h1>
-    <p class="tagline">
-      Agentic agricultural data sharing — platform status
-    </p>
-
-    <section v-if="error" class="card error">
-      <h2>Backend unreachable</h2>
-      <p>{{ error }}</p>
-      <p class="hint">Is the backend running on {{ backendURL }}?</p>
-    </section>
-
-    <section v-else-if="status" class="card" :class="status.status">
-      <h2>
-        Backend:
-        <span class="pill" :class="status.status">{{ status.status }}</span>
-      </h2>
-      <dl>
-        <dt>Service</dt>
-        <dd>{{ status.service }}</dd>
-        <dt>Backend version</dt>
-        <dd>{{ status.version }}</dd>
-        <dt>Agent</dt>
-        <dd>
-          <span v-if="status.agentReachable">
-            reachable (v{{ status.agentVersion }})
-          </span>
-          <span v-else>unreachable</span>
-        </dd>
-      </dl>
-      <p class="hint">
-        This page fetched the backend's status live; the agent round trip ran
-        through the Go↔Agent contract.
-      </p>
-    </section>
-
-    <section v-else class="card">
-      <h2>Checking backend…</h2>
-    </section>
-  </main>
+  <div class="shell">
+    <header class="topbar">
+      <NuxtLink to="/" class="brand">Thresh</NuxtLink>
+      <nav>
+        <template v-if="account">
+          <span class="who">{{ account.displayName }}</span>
+          <button class="link" @click="logout">Log out</button>
+        </template>
+        <template v-else>
+          <NuxtLink to="/register">Register</NuxtLink>
+          <NuxtLink to="/login">Log in</NuxtLink>
+        </template>
+      </nav>
+    </header>
+    <main><NuxtPage /></main>
+  </div>
 </template>
 
-<style scoped>
-.wrap {
-  max-width: 40rem;
-  margin: 3rem auto;
-  padding: 0 1rem;
-  font-family: system-ui, -apple-system, sans-serif;
+<style>
+:root {
+  --ink: #2b3327;
+  --muted: #5b6350;
+  --line: #d8dcd2;
+  --card: #ffffff;
+  --bg: #f4f5f0;
+  --accent: #2f5d28;
+  --accent-soft: #e4efe0;
+  --warn: #8a5a00;
+  --warn-soft: #fdf0d8;
+  --danger: #c44536;
 }
-.tagline {
-  color: #5b6350;
-  margin-bottom: 2rem;
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.5rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+.brand {
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+nav {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+nav a:hover {
+  color: var(--ink);
+}
+.who {
+  color: var(--muted);
+}
+.link {
+  border: 0;
+  background: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.link:hover {
+  color: var(--ink);
+}
+main {
+  flex: 1;
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+  box-sizing: border-box;
 }
 .card {
-  border: 1px solid #d8dcd2;
+  background: var(--card);
+  border: 1px solid var(--line);
   border-radius: 0.5rem;
-  padding: 1.25rem 1.5rem;
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
 }
 .card.error {
-  border-color: #c44536;
+  border-color: var(--danger);
+}
+label {
+  display: block;
+  margin-bottom: 0.9rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+input,
+textarea,
+select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  font: inherit;
+  background: #fff;
+}
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 0.35rem;
+  padding: 0.55rem 1.2rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+button.secondary {
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  padding: 0.45rem 1rem;
+  font: inherit;
+  cursor: pointer;
+}
+button.danger {
+  background: #fff;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 0.35rem;
+  padding: 0.45rem 1rem;
+  font: inherit;
+  cursor: pointer;
+}
+.error-text {
+  color: var(--danger);
+}
+.ok-text {
+  color: var(--accent);
+}
+.hint {
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 .pill {
   display: inline-block;
   padding: 0.1rem 0.6rem;
   border-radius: 999px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: 600;
 }
 .pill.ok {
-  background: #e4efe0;
-  color: #2f5d28;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
-.pill.degraded {
-  background: #fdf0d8;
-  color: #8a5a00;
+.pill.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
 }
-dl {
-  display: grid;
-  grid-template-columns: 9rem 1fr;
-  row-gap: 0.4rem;
-  margin: 1rem 0;
-}
-dt {
-  color: #5b6350;
-}
-.hint {
-  color: #7a8171;
-  font-size: 0.85rem;
+.pill.bad {
+  background: #fbe4e1;
+  color: var(--danger);
 }
 </style>

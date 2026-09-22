@@ -13,6 +13,7 @@ import (
 	"github.com/syaikhipin/entrustdn-final/backend/internal/agentclient"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/api"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/config"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/postgres"
 )
 
@@ -45,15 +46,32 @@ func run() error {
 		return err
 	}
 
-	// Dev mail sink (stubbed, ticket 01): verification links will land in
-	// the server log at pilot stage (spec: Membership;MAIL_SINK=log). The
-	// mailsink package + its tests are the stub; registration wiring lands
-	// with ticket 02.
+	// Dev mail sink: verification links land in the server log at pilot
+	// stage (spec: Membership; MAIL_SINK=log). An SMTP sink slots in behind
+	// the same interface when the pilot gets a mail server.
+	var mail mailsink.Sink = mailsink.NewLogSink(os.Stderr)
 	if cfg.DevMode {
-		log.Printf("thresh-backend %s: dev mode on — verification links will go to the log sink", version)
+		log.Printf("thresh-backend %s: dev mode on — verification links go to the log sink", version)
 	}
 
-	handler := api.NewHandler(agentclient.New(cfg.AgentBaseURL), version)
+	store := postgres.NewStore(pool)
+
+	// Seed the first Platform Admin and initial TOS version (idempotent).
+	if err := runBootstrap(ctx, store, mail, bootstrapConfig{
+		AdminEmail:    cfg.BootstrapAdminEmail,
+		AdminPassword: cfg.BootstrapAdminPassword,
+		TOSVersion:    cfg.BootstrapTOSVersion,
+		TOSBody:       cfg.BootstrapTOSBody,
+	}); err != nil {
+		return err
+	}
+
+	handler := api.NewHandler(api.Deps{
+		Agent:   agentclient.New(cfg.AgentBaseURL),
+		Version: version,
+		Store:   store,
+		Mail:    mail,
+	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           handler,

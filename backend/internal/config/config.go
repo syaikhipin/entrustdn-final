@@ -21,6 +21,14 @@ type Config struct {
 	DevMode bool
 	// DevMailSink selects the email sink: "log" (dev) or "smtp" (later).
 	DevMailSink string
+	// BootstrapAdminEmail / BootstrapAdminPassword provision the first
+	// Platform Admin at startup (registration refuses the role). Required.
+	BootstrapAdminEmail string
+	BootstrapAdminPassword string
+	// BootstrapTOSVersion / BootstrapTOSBody publish the initial Terms of
+	// Service version at startup. Required.
+	BootstrapTOSVersion string
+	BootstrapTOSBody    string
 }
 
 // Load reads config from the environment, applying defaults and failing
@@ -45,6 +53,20 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.DevMode = devMode
+
+	// Bootstrap facts are required with pilot defaults so `make dev` works
+	// without extra setup; production deployments override them.
+	cfg.BootstrapAdminEmail = getenvDefault("BOOTSTRAP_ADMIN_EMAIL", "admin@thresh.dev")
+	cfg.BootstrapAdminPassword = getenvDefault("BOOTSTRAP_ADMIN_PASSWORD", "thresh-admin")
+	cfg.BootstrapTOSVersion = getenvDefault("BOOTSTRAP_TOS_VERSION", "1.0")
+	cfg.BootstrapTOSBody = getenvDefault("BOOTSTRAP_TOS_BODY",
+		`Thresh Terms of Service (pilot v1.0).
+
+By accepting this contract you agree to the pilot's ground rules: Farmer
+Organizations keep ownership and control of everything they share; shared
+data is anonymized before it leaves the platform; Data Consumers receive
+anonymized data only; and Farmer Members are never identifiable. The
+platform records which version you accepted and when.`)
 
 	return cfg, nil
 }

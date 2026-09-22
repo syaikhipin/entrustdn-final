@@ -1,6 +1,7 @@
 // Package api exposes the backend's public HTTP API (Seam 1). Handlers take
 // collaborators via constructor injection; tests drive them at the HTTP
-// boundary with the agent replaced by a contract fake.
+// boundary with the agent replaced by a contract fake and the store by an
+// in-memory double.
 package api
 
 import (
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/membership"
 )
 
 // Pinger is the slice of the agent client the status endpoint needs.
@@ -21,10 +24,22 @@ type Pinger interface {
 	Ping(ctx context.Context, nonce string) (contract.PingResponse, error)
 }
 
+// Deps carries the collaborators the API needs. Non-nil dependencies are
+// required by NewHandler; store and mail are mandatory for the membership
+// endpoints to register.
+type Deps struct {
+	Agent   Pinger
+	Version string
+	Store   membership.Store
+	Mail    mailsink.Sink
+}
+
 // Handler serves the backend API.
 type Handler struct {
 	agent   Pinger
 	version string
+	store   membership.Store
+	mail    mailsink.Sink
 	mux     *http.ServeMux
 }
 
@@ -36,10 +51,12 @@ var allowedOrigins = map[string]bool{
 }
 
 // NewHandler wires routes and returns the backend's HTTP handler.
-func NewHandler(agent Pinger, version string) http.Handler {
+func NewHandler(deps Deps) http.Handler {
 	h := &Handler{
-		agent:   agent,
-		version: version,
+		agent:   deps.Agent,
+		version: deps.Version,
+		store:   deps.Store,
+		mail:    deps.Mail,
 		mux:     http.NewServeMux(),
 	}
 	h.mux.HandleFunc("GET /api/v1/status", h.handleStatus)
@@ -47,6 +64,20 @@ func NewHandler(agent Pinger, version string) http.Handler {
 		w.Header().Set("Allow", "GET")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
+
+	if h.store != nil {
+		h.mux.HandleFunc("POST /api/v1/register", h.handleRegister)
+		h.mux.HandleFunc("POST /api/v1/verify", h.handleVerify)
+		h.mux.HandleFunc("POST /api/v1/login", h.handleLogin)
+		h.mux.HandleFunc("POST /api/v1/logout", h.handleLogout)
+		h.mux.HandleFunc("GET /api/v1/me", h.handleMe)
+		h.mux.HandleFunc("POST /api/v1/tos/accept", h.handleTOSAccept)
+		h.mux.HandleFunc("GET /api/v1/tos/current", h.handleCurrentTOS)
+		h.mux.HandleFunc("GET /api/v1/admin/applications", h.handleListApplications)
+		h.mux.HandleFunc("POST /api/v1/admin/applications/decide", h.handleApplicationDecision)
+		h.mux.HandleFunc("POST /api/v1/admin/tos", h.handlePublishTOS)
+	}
+
 	return withCORS(h.mux)
 }
 
