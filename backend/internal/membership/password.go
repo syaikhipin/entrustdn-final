@@ -51,23 +51,40 @@ func HashPassword(password string) (string, error) {
 func CheckPassword(hash, password string) bool {
 	parts := strings.Split(hash, "$")
 	if len(parts) != 4 || parts[0] != passwordScheme {
+		// Still burn comparable work so callers can't time-distinguish a
+		// malformed stored hash from a real check (defensive; the register
+		// path only ever stores well-formed hashes).
+		DummyCheck(password)
 		return false
 	}
 	var iterations int
 	if _, err := fmt.Sscanf(parts[1], "%d", &iterations); err != nil || iterations <= 0 {
+		DummyCheck(password)
 		return false
 	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[2])
 	if err != nil {
+		DummyCheck(password)
 		return false
 	}
 	want, err := base64.RawStdEncoding.DecodeString(parts[3])
 	if err != nil {
+		DummyCheck(password)
 		return false
 	}
 	got, err := pbkdf2.Key(sha256.New, password, salt, iterations, len(want))
 	if err != nil {
+		DummyCheck(password)
 		return false
 	}
 	return subtle.ConstantTimeCompare(got, want) == 1
+}
+
+// DummyCheck runs a PBKDF2 derivation at the standard work factor and
+// discards the result. Login paths call it when the account does not exist,
+// so the response time for "unknown email" matches "wrong password" and the
+// endpoint cannot be used to enumerate registered addresses by timing.
+func DummyCheck(password string) {
+	salt := []byte("thresh-dummy-check-salt")
+	_, _ = pbkdf2.Key(sha256.New, password, salt, passwordIterations, 32)
 }

@@ -71,10 +71,10 @@ func decodeResp(t *testing.T, resp *http.Response) (int, map[string]any) {
 
 func TestRegistrationCreatesUnverifiedAccountAndLogsVerificationLink(t *testing.T) {
 	tests := []struct {
-		name         string
-		role         string
-		wantRole     string
-		wantStatus   string
+		name       string
+		role       string
+		wantRole   string
+		wantStatus string
 	}{
 		{
 			name:       "data consumer",
@@ -141,9 +141,9 @@ func TestRegistrationCreatesUnverifiedAccountAndLogsVerificationLink(t *testing.
 
 func TestRegistrationRejectsBadApplications(t *testing.T) {
 	tests := []struct {
-		name    string
-		body    map[string]any
-		want    int
+		name string
+		body map[string]any
+		want int
 	}{
 		{
 			name: "duplicate email",
@@ -301,11 +301,11 @@ func TestLoginGatesOnVerificationAndTOS(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		publishV2  bool
+		name        string
+		publishV2   bool
 		verifyFirst bool
-		wantLogin  int
-		wantReacc  bool
+		wantLogin   int
+		wantReacc   bool
 	}{
 		{name: "unverified account cannot log in", verifyFirst: false, wantLogin: http.StatusForbidden, wantReacc: false},
 		{name: "verified account with current TOS logs in clean", verifyFirst: true, wantLogin: http.StatusOK, wantReacc: false},
@@ -374,7 +374,6 @@ func TestLoginRejectsWrongCredentials(t *testing.T) {
 	}
 }
 
-
 func getWithToken(t *testing.T, srv *httptest.Server, path, token string) (int, map[string]any) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
@@ -389,8 +388,8 @@ func getWithToken(t *testing.T, srv *httptest.Server, path, token string) (int, 
 
 func TestMeReturnsRoleAppropriateIdentity(t *testing.T) {
 	tests := []struct {
-		role      string
-		wantRole  string
+		role     string
+		wantRole string
 	}{
 		{role: "data_consumer", wantRole: "data_consumer"},
 		{role: "farmer_organization", wantRole: "farmer_organization"},
@@ -736,12 +735,12 @@ func TestRoleRoutingClaims(t *testing.T) {
 	// job; the API's contract is that /me reports the role, status, and TOS
 	// state each home routes on. This table pins that contract per role.
 	tests := []struct {
-		name         string
-		role         string
-		provision    func(t *testing.T, srv *httptest.Server, mail *bytes.Buffer, store *membership.MemoryStore, email string)
-		email        string
-		wantRole     string
-		wantStatus   string
+		name       string
+		role       string
+		provision  func(t *testing.T, srv *httptest.Server, mail *bytes.Buffer, store *membership.MemoryStore, email string)
+		email      string
+		wantRole   string
+		wantStatus string
 	}{
 		{
 			name: "data consumer lands active",

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // TOS re-acceptance interstitial: a session flagged at login lands here and
 // stays until it accepts the current version (story 8).
-import { acceptTos, errFrom, fetchCurrentTos, fetchMe } from "~/auth";
+import { acceptTos, errFrom, fetchCurrentTos, fetchMe, homeRoute } from "~/auth";
 
 const backendURL = useBackendURL();
 const { token, me, refresh, restore } = useSession();
@@ -30,8 +30,9 @@ async function accept() {
   try {
     await acceptTos(backendURL, token.value, tos.value.version);
     // Re-pull identity: the flag is now cleared server-side.
-    refresh(await fetchMe(backendURL, token.value));
-    navigateTo(`/${useSession().home.value}`);
+    const identity = await fetchMe(backendURL, token.value);
+    refresh(identity);
+    navigateTo(`/${homeRoute(identity.account, false)}`);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {

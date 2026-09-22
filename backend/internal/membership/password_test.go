@@ -97,3 +97,21 @@ func TestHashPasswordRejectsEmpty(t *testing.T) {
 		t.Fatal("HashPassword(\"\") error = nil, want an error")
 	}
 }
+
+func TestDummyCheckAcceptsAnyInput(t *testing.T) {
+	// DummyCheck exists purely to equalize login-path work when the account
+	// is unknown; it must never panic and never report anything.
+	tests := []struct {
+		name     string
+		password string
+	}{
+		{name: "normal password", password: "harvest-2026"},
+		{name: "empty string", password: ""},
+		{name: "unicode", password: "🌾 dairy"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			membership.DummyCheck(tt.password) // must not panic
+		})
+	}
+}

@@ -5,20 +5,28 @@ import { useSession } from "~/composables/useSession";
 
 const { me, account, restore } = useSession();
 
-onMounted(() => restore());
+const ready = ref(false);
 
-watch(
-  () => account.value,
-  (acct) => {
-    if (!acct) navigateTo("/login");
-  },
-  { immediate: true },
-);
+onMounted(async () => {
+  await restore();
+  ready.value = true;
+});
+
+// The guard waits for restore(): before it finishes, a refreshing user has
+// a token but no parsed identity, and bouncing then would strand them at
+// /login. Only a completed restore with no account is truly signed out.
+watch(ready, (isReady) => {
+  if (isReady && !account.value) navigateTo("/login");
+});
 </script>
 
 <template>
   <div>
-    <section v-if="account?.status === 'pending_approval'" class="card">
+    <section v-if="!ready" class="card">
+      <p class="hint">Loading…</p>
+    </section>
+
+    <section v-else-if="account?.status === 'pending_approval'" class="card">
       <h2>Application pending</h2>
       <p>
         <strong>{{ account.displayName }}</strong> is registered, but a

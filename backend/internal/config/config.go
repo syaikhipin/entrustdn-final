@@ -23,7 +23,7 @@ type Config struct {
 	DevMailSink string
 	// BootstrapAdminEmail / BootstrapAdminPassword provision the first
 	// Platform Admin at startup (registration refuses the role). Required.
-	BootstrapAdminEmail string
+	BootstrapAdminEmail    string
 	BootstrapAdminPassword string
 	// BootstrapTOSVersion / BootstrapTOSBody publish the initial Terms of
 	// Service version at startup. Required.

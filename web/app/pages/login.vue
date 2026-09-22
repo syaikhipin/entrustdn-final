@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Login: check credentials, store the session, forward to the
 // role-appropriate home (the router sends TOS-flagged sessions to /tos).
-import { errFrom, fetchMe, login, parseMe } from "~/auth";
+import { errFrom, fetchMe, homeRoute, login } from "~/auth";
 
 const backendURL = useBackendURL();
 const { signIn } = useSession();
@@ -17,13 +17,9 @@ async function submit() {
   try {
     const { token, requiresTosAcceptance } = await login(backendURL, email.value, password.value);
     // /me completes the identity (TOS record included) before routing.
-    const me = parseMe(
-      await fetch(`${backendURL}/api/v1/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).then((r) => r.json()),
-    );
+    const me = await fetchMe(backendURL, token);
     signIn(token, { ...me, requiresTosAcceptance });
-    navigateTo(requiresTosAcceptance ? "/tos" : `/${useSession().home.value}`);
+    navigateTo(requiresTosAcceptance ? "/tos" : `/${homeRoute(me.account, false)}`);
   } catch (e) {
     error.value = e instanceof Error ? e.message : errFrom(e);
   } finally {

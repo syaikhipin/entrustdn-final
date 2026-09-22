@@ -208,7 +208,9 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	acct, err := h.store.AccountByEmail(ctx, email)
 	if err != nil {
 		// Same answer for unknown email and wrong password: 401, no hint
-		// about which half was wrong.
+		// about which half was wrong — and the same work, so the endpoint
+		// can't be used to enumerate registered addresses by timing.
+		membership.DummyCheck(req.Password)
 		apiError(w, http.StatusUnauthorized, "email or password is incorrect")
 		return
 	}
@@ -259,9 +261,9 @@ func (h *Handler) tosStaleFor(ctx context.Context, accountID string) (bool, erro
 
 func loginResponse(acct membership.Account, token string, stale bool) map[string]any {
 	return map[string]any{
-		"account":                  acct.Public(),
-		"session":                  map[string]any{"token": token},
-		"requires_tos_acceptance":  stale,
+		"account":                 acct.Public(),
+		"session":                 map[string]any{"token": token},
+		"requires_tos_acceptance": stale,
 	}
 }
 

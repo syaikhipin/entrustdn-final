@@ -147,8 +147,8 @@ type MemoryStore struct {
 // NewMemoryStore returns an empty store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		accounts:    map[string]Account{},
-		byEmail:     map[string]string{},
+		accounts: map[string]Account{},
+		byEmail:  map[string]string{},
 		verifTokens: map[string]struct {
 			accountID string
 			expiresAt time.Time

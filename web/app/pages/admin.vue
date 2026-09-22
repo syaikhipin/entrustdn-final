@@ -7,6 +7,7 @@ import { useSession } from "~/composables/useSession";
 const backendURL = useBackendURL();
 const { token, account, restore } = useSession();
 
+const ready = ref(false);
 const applications = ref<Application[]>([]);
 const error = ref<string | null>(null);
 const notice = ref<string | null>(null);
@@ -18,16 +19,19 @@ const tosBody = ref("");
 const tosNotice = ref<string | null>(null);
 const tosError = ref<string | null>(null);
 
-onMounted(() => restore());
+onMounted(async () => {
+  await restore();
+  ready.value = true;
+});
 
-watch(
-  () => account.value,
-  (acct) => {
-    if (!acct) navigateTo("/login");
-    else if (acct.role === "platform_admin") load();
-  },
-  { immediate: true },
-);
+// The guard waits for restore(): before it finishes, a refreshing admin has
+// a token but no parsed identity, and bouncing then would strand them at
+// /login. Only a completed restore with no account is truly signed out.
+watch(ready, (isReady) => {
+  if (!isReady) return;
+  if (!account.value) navigateTo("/login");
+  else if (account.value.role === "platform_admin") load();
+});
 
 async function load() {
   if (!token.value) return;
@@ -74,7 +78,12 @@ async function publish() {
 
 <template>
   <div>
-    <section class="card">
+    <section v-if="!ready" class="card">
+      <p class="hint">Loading…</p>
+    </section>
+
+    <template v-else>
+      <section class="card">
       <h2>Platform Admin</h2>
       <p class="hint">
         Applications and contract versions today; taxonomy, modules, and
@@ -122,6 +131,7 @@ async function publish() {
         <button class="primary" type="submit">Publish version</button>
       </form>
     </section>
+    </template>
   </div>
 </template>
 
