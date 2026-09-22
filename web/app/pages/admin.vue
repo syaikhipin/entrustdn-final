@@ -1,7 +1,18 @@
 <script setup lang="ts">
 // Platform Admin home: the Farmer Organization application queue
-// (approve/reject) and TOS publishing.
+// (approve/reject), TOS publishing, and the credits desk (ticket 03) —
+// grants, signed adjustments, automatically-priced test charges, and the
+// price book.
 import { decideApplication, errFrom, listApplications, publishTos, type Application } from "~/auth";
+import {
+  adminAdjust,
+  adminCharge,
+  adminGrant,
+  fetchPricing,
+  formatCredits,
+  savePricing,
+  type PricingRules,
+} from "~/credits";
 import { useSession } from "~/composables/useSession";
 
 const backendURL = useBackendURL();
@@ -19,6 +30,27 @@ const tosBody = ref("");
 const tosNotice = ref<string | null>(null);
 const tosError = ref<string | null>(null);
 
+// Credits desk form state.
+const creditAccountId = ref("");
+const creditAmount = ref<number | null>(null);
+const creditMemo = ref("");
+const creditNotice = ref<string | null>(null);
+const creditError = ref<string | null>(null);
+
+// Test charge form state.
+const chargeModel = ref("");
+const chargeInput = ref<number | null>(null);
+const chargeCached = ref<number | null>(null);
+const chargeOutput = ref<number | null>(null);
+const chargeDataClass = ref<"cached" | "unique">("cached");
+const chargeUnits = ref<number | null>(null);
+const chargeMode = ref<"inference" | "data">("inference");
+
+// Price book state.
+const pricing = ref<PricingRules | null>(null);
+const pricingNotice = ref<string | null>(null);
+const pricingError = ref<string | null>(null);
+
 onMounted(async () => {
   await restore();
   ready.value = true;
@@ -30,7 +62,10 @@ onMounted(async () => {
 watch(ready, (isReady) => {
   if (!isReady) return;
   if (!account.value) navigateTo("/login");
-  else if (account.value.role === "platform_admin") load();
+  else if (account.value.role === "platform_admin") {
+    load();
+    loadPricing();
+  }
 });
 
 async function load() {
@@ -38,7 +73,26 @@ async function load() {
   try {
     applications.value = await listApplications(backendURL, token.value);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    error.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+async function loadPricing() {
+  if (!token.value) return;
+  pricingError.value = null;
+  try {
+    pricing.value = await fetchPricing(backendURL, token.value);
+  } catch (e) {
+    // An unconfigured price book is a normal pilot state; anything else
+    // (network, auth) must NOT hand the admin an editable empty book they
+    // could accidentally save over the real one.
+    const msg = e instanceof Error ? e.message : errFrom(e);
+    if (/no price book/i.test(msg)) {
+      pricing.value = { inference: [], data: { cachedAssetMicrosPerUnit: 0, uniqueMicrosPerUnit: 0 } };
+    } else {
+      pricing.value = null;
+      pricingError.value = msg;
+    }
   }
 }
 
@@ -74,6 +128,120 @@ async function publish() {
     tosError.value = e instanceof Error ? e.message : errFrom(e);
   }
 }
+
+// microsFromCredits parses a whole-or-fractional credit amount into micros;
+// null when the field is empty or not a number.
+function microsFromCredits(value: number | null): number | null {
+  if (value === null || Number.isNaN(value)) return null;
+  return Math.round(value * 1_000_000);
+}
+
+// requireCreditForm validates the credits-desk form; returns the target
+// account id and amount in micros, or null after setting creditError.
+function requireCreditForm(positiveOnly: boolean): { id: string; micros: number } | null {
+  creditError.value = null;
+  const id = creditAccountId.value.trim();
+  if (id === "") {
+    creditError.value = "Give the account id to credit.";
+    return null;
+  }
+  const micros = microsFromCredits(creditAmount.value);
+  if (micros === null || micros === 0) {
+    creditError.value = "Give a non-zero amount in credits.";
+    return null;
+  }
+  if (positiveOnly && micros <= 0) {
+    creditError.value = "Grants must be positive — use the adjustment for corrections.";
+    return null;
+  }
+  return { id, micros };
+}
+
+async function grant() {
+  if (!token.value) return;
+  creditNotice.value = null;
+  const form = requireCreditForm(true);
+  if (form === null) return;
+  try {
+    await adminGrant(backendURL, token.value, form.id, form.micros, creditMemo.value.trim());
+    creditNotice.value = `Granted ${formatCredits(form.micros)} — posted through the ledger.`;
+  } catch (e) {
+    creditError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+async function adjust() {
+  if (!token.value) return;
+  creditNotice.value = null;
+  const form = requireCreditForm(false);
+  if (form === null) return;
+  try {
+    await adminAdjust(backendURL, token.value, form.id, form.micros, creditMemo.value.trim());
+    creditNotice.value = `Adjusted by ${formatCredits(form.micros)} — the ledger holds the correction.`;
+  } catch (e) {
+    creditError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+async function charge() {
+  if (!token.value) return;
+  creditNotice.value = null;
+  const id = creditAccountId.value.trim();
+  if (id === "") {
+    creditError.value = "Give the account id to charge.";
+    return;
+  }
+  try {
+    let charged: number;
+    if (chargeMode.value === "inference") {
+      charged = await adminCharge(backendURL, token.value, {
+        accountId: id,
+        inference: {
+          model: chargeModel.value.trim(),
+          inputTokens: Math.max(0, Math.round(chargeInput.value ?? 0)),
+          cachedInputTokens: Math.max(0, Math.round(chargeCached.value ?? 0)),
+          outputTokens: Math.max(0, Math.round(chargeOutput.value ?? 0)),
+        },
+        memo: creditMemo.value.trim(),
+      });
+    } else {
+      charged = await adminCharge(backendURL, token.value, {
+        accountId: id,
+        data: { class: chargeDataClass.value, units: Math.max(0, Math.round(chargeUnits.value ?? 0)) },
+        memo: creditMemo.value.trim(),
+      });
+    }
+    creditNotice.value = `Charged ${formatCredits(charged)} — priced automatically from the current price book.`;
+  } catch (e) {
+    creditError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+async function saveRules() {
+  if (!token.value || !pricing.value) return;
+  pricingError.value = null;
+  pricingNotice.value = null;
+  try {
+    await savePricing(backendURL, token.value, pricing.value);
+    pricingNotice.value = "Price book saved — future charges use it immediately; posted movements are never rewritten.";
+  } catch (e) {
+    pricingError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+function addModelRule() {
+  if (!pricing.value) return;
+  pricing.value.inference.push({
+    model: "",
+    inputMicrosPer1K: 0,
+    cachedInputMicrosPer1K: 0,
+    outputMicrosPer1K: 0,
+  });
+}
+
+function removeModelRule(index: number) {
+  pricing.value?.inference.splice(index, 1);
+}
 </script>
 
 <template>
@@ -84,53 +252,172 @@ async function publish() {
 
     <template v-else>
       <section class="card">
-      <h2>Platform Admin</h2>
-      <p class="hint">
-        Applications and contract versions today; taxonomy, modules, and
-        platform stats arrive in later slices.
-      </p>
-      <p v-if="error" class="error-text">{{ error }}</p>
-      <p v-if="notice" class="ok-text">{{ notice }}</p>
-    </section>
+        <h2>Platform Admin</h2>
+        <p class="hint">
+          Applications, contract versions, and the credits desk today;
+          taxonomy, modules, and platform stats arrive in later slices.
+        </p>
+        <p v-if="error" class="error-text">{{ error }}</p>
+        <p v-if="notice" class="ok-text">{{ notice }}</p>
+      </section>
 
-    <section class="card">
-      <h3>Farmer Organization applications</h3>
-      <p v-if="applications.length === 0" class="hint">No pending applications.</p>
-      <ul v-else class="queue">
-        <li v-for="app in applications" :key="app.id" class="row">
-          <div>
-            <strong>{{ app.displayName }}</strong>
-            <div class="hint">{{ app.email }} · applied {{ new Date(app.createdAt).toLocaleDateString() }}</div>
-          </div>
+      <section class="card">
+        <h3>Farmer Organization applications</h3>
+        <p v-if="applications.length === 0" class="hint">No pending applications.</p>
+        <ul v-else class="queue">
+          <li v-for="app in applications" :key="app.id" class="row">
+            <div>
+              <strong>{{ app.displayName }}</strong>
+              <div class="hint">{{ app.email }} · applied {{ new Date(app.createdAt).toLocaleDateString() }}</div>
+            </div>
+            <div class="row-actions">
+              <button class="primary" :disabled="busyId === app.id" @click="decide(app, 'approve')">Approve</button>
+              <button class="danger" :disabled="busyId === app.id" @click="decide(app, 'reject')">Reject</button>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h3>Credits desk</h3>
+        <p class="hint">
+          Every grant, adjustment, and test charge posts a balanced movement
+          through the ledger. Charges are priced automatically from the price
+          book below — cached tokens bill at the cached rate, fresh tokens and
+          outputs at their own rates.
+        </p>
+        <form @submit.prevent>
+          <label>
+            Account id
+            <input v-model="creditAccountId" type="text" required placeholder="acct-uuid…" />
+          </label>
+          <label>
+            Amount (credits)
+            <input v-model.number="creditAmount" type="number" step="0.000001" placeholder="e.g. 100" />
+          </label>
+          <label>
+            Memo
+            <input v-model="creditMemo" type="text" placeholder="why this movement exists" />
+          </label>
           <div class="row-actions">
-            <button class="primary" :disabled="busyId === app.id" @click="decide(app, 'approve')">Approve</button>
-            <button class="danger" :disabled="busyId === app.id" @click="decide(app, 'reject')">Reject</button>
+            <button class="primary" type="button" @click="grant">Grant</button>
+            <button type="button" @click="adjust">Adjust</button>
           </div>
-        </li>
-      </ul>
-    </section>
+        </form>
 
-    <section class="card">
-      <h3>Publish a new Terms of Service version</h3>
-      <p class="hint">
-        Publishing makes the version current: every account that accepted an
-        older one must re-accept at next login. Versions are immutable once
-        published.
-      </p>
-      <form @submit.prevent="publish">
-        <label>
-          Version
-          <input v-model="tosVersion" type="text" required placeholder="e.g. 1.1" />
-        </label>
-        <label>
-          Terms text
-          <textarea v-model="tosBody" rows="5" required placeholder="The full contract text…"></textarea>
-        </label>
-        <p v-if="tosError" class="error-text">{{ tosError }}</p>
-        <p v-if="tosNotice" class="ok-text">{{ tosNotice }}</p>
-        <button class="primary" type="submit">Publish version</button>
-      </form>
-    </section>
+        <h4>Test charge (automatic pricing)</h4>
+        <p class="hint">
+          Posts a real charge against the account at current prices — the demo
+          path for the pricing engine.
+        </p>
+        <div class="row-actions charge-mode">
+          <label><input v-model="chargeMode" type="radio" value="inference" /> Inference</label>
+          <label><input v-model="chargeMode" type="radio" value="data" /> Data</label>
+        </div>
+        <form @submit.prevent>
+          <template v-if="chargeMode === 'inference'">
+            <label>
+              Model
+              <input v-model="chargeModel" type="text" placeholder="e.g. test-model" />
+            </label>
+            <label>
+              Input tokens
+              <input v-model.number="chargeInput" type="number" min="0" />
+            </label>
+            <label>
+              Cached input tokens
+              <input v-model.number="chargeCached" type="number" min="0" />
+            </label>
+            <label>
+              Output tokens
+              <input v-model.number="chargeOutput" type="number" min="0" />
+            </label>
+          </template>
+          <template v-else>
+            <label>
+              Data class
+              <select v-model="chargeDataClass">
+                <option value="cached">cached (already on the platform)</option>
+                <option value="unique">unique (fresh to this request)</option>
+              </select>
+            </label>
+            <label>
+              Units
+              <input v-model.number="chargeUnits" type="number" min="0" />
+            </label>
+          </template>
+          <button class="primary" type="button" @click="charge">Post charge</button>
+        </form>
+        <p v-if="creditError" class="error-text">{{ creditError }}</p>
+        <p v-if="creditNotice" class="ok-text">{{ creditNotice }}</p>
+      </section>
+
+      <section class="card">
+        <h3>Price book</h3>
+        <p class="hint">
+          Rates are micro-credits per 1k tokens (inference) or per unit
+          (data). Saving applies to future charges only.
+        </p>
+        <p v-if="pricingError" class="error-text">{{ pricingError }}</p>
+        <p v-if="pricingNotice" class="ok-text">{{ pricingNotice }}</p>
+        <p v-if="!pricing && !pricingError" class="hint">Loading price book…</p>
+        <template v-if="pricing">
+          <table class="ledger">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th class="num">Input /1k</th>
+                <th class="num">Cached input /1k</th>
+                <th class="num">Output /1k</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(rule, i) in pricing.inference" :key="i">
+                <td><input v-model="rule.model" type="text" placeholder="model name" /></td>
+                <td class="num"><input v-model.number="rule.inputMicrosPer1K" type="number" min="0" class="rate" /></td>
+                <td class="num"><input v-model.number="rule.cachedInputMicrosPer1K" type="number" min="0" class="rate" /></td>
+                <td class="num"><input v-model.number="rule.outputMicrosPer1K" type="number" min="0" class="rate" /></td>
+                <td><button type="button" class="danger" @click="removeModelRule(i)">✕</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <button type="button" @click="addModelRule">Add model rule</button>
+
+          <h4>Data rates</h4>
+          <label>
+            Cached asset, micros per unit
+            <input v-model.number="pricing.data.cachedAssetMicrosPerUnit" type="number" min="0" />
+          </label>
+          <label>
+            Unique data, micros per unit
+            <input v-model.number="pricing.data.uniqueMicrosPerUnit" type="number" min="0" />
+          </label>
+          <button class="primary" type="button" @click="saveRules">Save price book</button>
+        </template>
+      </section>
+
+      <section class="card">
+        <h3>Publish a new Terms of Service version</h3>
+        <p class="hint">
+          Publishing makes the version current: every account that accepted an
+          older one must re-accept at next login. Versions are immutable once
+          published.
+        </p>
+        <form @submit.prevent="publish">
+          <label>
+            Version
+            <input v-model="tosVersion" type="text" required placeholder="e.g. 1.1" />
+          </label>
+          <label>
+            Terms text
+            <textarea v-model="tosBody" rows="5" required placeholder="The full contract text…"></textarea>
+          </label>
+          <p v-if="tosError" class="error-text">{{ tosError }}</p>
+          <p v-if="tosNotice" class="ok-text">{{ tosNotice }}</p>
+          <button class="primary" type="submit">Publish version</button>
+        </form>
+      </section>
     </template>
   </div>
 </template>
@@ -156,5 +443,31 @@ async function publish() {
   display: flex;
   gap: 0.5rem;
   flex-shrink: 0;
+}
+.charge-mode {
+  margin: 0.5rem 0;
+}
+.ledger {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.75rem;
+}
+.ledger th,
+.ledger td {
+  text-align: left;
+  padding: 0.4rem 0.5rem 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.ledger th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rate {
+  width: 7rem;
 }
 </style>

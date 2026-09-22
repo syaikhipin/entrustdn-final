@@ -3,6 +3,10 @@
 // makes after login. Parsers are the frontend half of the backend contract —
 // unknown shapes throw rather than render wrong.
 
+import { apiCall, authedHeader, errFrom } from "~/api";
+
+export { errFrom };
+
 export type Role = "data_consumer" | "farmer_organization" | "platform_admin";
 export type AccountStatus = "active" | "pending_approval" | "rejected";
 
@@ -25,15 +29,6 @@ export interface Me {
   account: PublicAccount;
   requiresTosAcceptance: boolean;
   tos?: TosRecord;
-}
-
-// errFrom extracts a human-facing message from a backend error document.
-export function errFrom(doc: unknown): string {
-  if (typeof doc === "object" && doc !== null && "error" in doc) {
-    const msg = (doc as Record<string, unknown>).error;
-    if (typeof msg === "string" && msg !== "") return msg;
-  }
-  return "The request failed — please try again.";
 }
 
 // --- Parsers ---
@@ -108,16 +103,6 @@ export function homeRoute(acct: PublicAccount, requiresTosAcceptance: boolean): 
 }
 
 // --- API client ---
-
-async function apiCall<T>(backend: string, path: string, init: RequestInit = {}): Promise<T> {
-  const resp = await fetch(`${backend}${path}`, {
-    headers: { "Content-Type": "application/json", ...init.headers },
-    ...init,
-  });
-  const doc = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(errFrom(doc));
-  return doc as T;
-}
 
 export async function register(
   backend: string,

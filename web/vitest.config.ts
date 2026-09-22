@@ -8,6 +8,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // Nuxt answers both spellings at build time; vitest needs it spelled
+      // out to run the same modules outside Nuxt.
+      "~": fileURLToPath(new URL("./app", import.meta.url)),
       "@": fileURLToPath(new URL("./app", import.meta.url)),
     },
   },

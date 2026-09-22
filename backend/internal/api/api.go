@@ -26,12 +26,14 @@ type Pinger interface {
 
 // Deps carries the collaborators the API needs. Non-nil dependencies are
 // required by NewHandler; store and mail are mandatory for the membership
-// endpoints to register.
+// endpoints to register. Credits is optional: when nil, the credits
+// endpoints (ticket 03) do not register.
 type Deps struct {
 	Agent   Pinger
 	Version string
 	Store   membership.Store
 	Mail    mailsink.Sink
+	Credits *CreditsDeps
 }
 
 // Handler serves the backend API.
@@ -40,6 +42,7 @@ type Handler struct {
 	version string
 	store   membership.Store
 	mail    mailsink.Sink
+	credits *creditsHandlers
 	mux     *http.ServeMux
 }
 
@@ -76,6 +79,10 @@ func NewHandler(deps Deps) http.Handler {
 		h.mux.HandleFunc("GET /api/v1/admin/applications", h.handleListApplications)
 		h.mux.HandleFunc("POST /api/v1/admin/applications/decide", h.handleApplicationDecision)
 		h.mux.HandleFunc("POST /api/v1/admin/tos", h.handlePublishTOS)
+	}
+
+	if deps.Credits != nil {
+		h.registerCreditsRoutes(deps.Credits)
 	}
 
 	return withCORS(h.mux)

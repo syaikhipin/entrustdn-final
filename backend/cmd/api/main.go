@@ -13,6 +13,7 @@ import (
 	"github.com/syaikhipin/entrustdn-final/backend/internal/agentclient"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/api"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/config"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/postgres"
 )
@@ -71,6 +72,13 @@ func run() error {
 		Version: version,
 		Store:   store,
 		Mail:    mail,
+		Credits: &api.CreditsDeps{
+			Store: postgres.NewCreditsStore(pool),
+			Rules: postgres.CreditRulesLoader(pool),
+			SaveRules: func(ctx context.Context, rules credits.PricingRules) error {
+				return postgres.SaveCreditRules(ctx, pool, rules)
+			},
+		},
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,
