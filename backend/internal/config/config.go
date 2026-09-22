@@ -29,7 +29,23 @@ type Config struct {
 	// Service version at startup. Required.
 	BootstrapTOSVersion string
 	BootstrapTOSBody    string
+	// S3 holds the object-storage connection (ADR 0006: server-side S3
+	// only). Endpoint is required when assets are enabled; when Endpoint is
+	// empty the asset endpoints do not register.
+	S3 S3Config
 }
+
+// S3Config carries the S3-compatible connection facts (MinIO in dev).
+type S3Config struct {
+	Endpoint    string // e.g. http://localhost:9000
+	Region      string // any non-empty region tag; S3-compatible services accept it
+	Bucket      string
+	AccessKeyID string
+	SecretKey   string
+}
+
+// Enabled reports whether object storage is configured.
+func (c S3Config) Enabled() bool { return c.Endpoint != "" }
 
 // Load reads config from the environment, applying defaults and failing
 // loudly on missing required values.
@@ -67,6 +83,21 @@ Organizations keep ownership and control of everything they share; shared
 data is anonymized before it leaves the platform; Data Consumers receive
 anonymized data only; and Farmer Members are never identifiable. The
 platform records which version you accepted and when.`)
+
+	// Object storage (ADR 0006). All or nothing: an endpoint without
+	// credentials is a misconfiguration, not a degraded mode.
+	cfg.S3 = S3Config{
+		Endpoint:    os.Getenv("S3_ENDPOINT_URL"),
+		Region:      getenvDefault("S3_REGION", "us-east-1"),
+		Bucket:      getenvDefault("S3_BUCKET", "thresh-assets"),
+		AccessKeyID: os.Getenv("S3_ACCESS_KEY_ID"),
+		SecretKey:   os.Getenv("S3_SECRET_KEY"),
+	}
+	if cfg.S3.Enabled() {
+		if cfg.S3.AccessKeyID == "" || cfg.S3.SecretKey == "" || cfg.S3.Bucket == "" {
+			return Config{}, fmt.Errorf("S3_ENDPOINT_URL is set but S3_ACCESS_KEY_ID / S3_SECRET_KEY / S3_BUCKET are incomplete")
+		}
+	}
 
 	return cfg, nil
 }

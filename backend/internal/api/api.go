@@ -27,13 +27,15 @@ type Pinger interface {
 // Deps carries the collaborators the API needs. Non-nil dependencies are
 // required by NewHandler; store and mail are mandatory for the membership
 // endpoints to register. Credits is optional: when nil, the credits
-// endpoints (ticket 03) do not register.
+// endpoints (ticket 03) do not register. Assets is optional: when nil, the
+// Data Asset endpoints (ticket 04) do not register.
 type Deps struct {
 	Agent   Pinger
 	Version string
 	Store   membership.Store
 	Mail    mailsink.Sink
 	Credits *CreditsDeps
+	Assets  *AssetsDeps
 }
 
 // Handler serves the backend API.
@@ -43,6 +45,7 @@ type Handler struct {
 	store   membership.Store
 	mail    mailsink.Sink
 	credits *creditsHandlers
+	assets  *assetsHandlers
 	mux     *http.ServeMux
 }
 
@@ -83,6 +86,10 @@ func NewHandler(deps Deps) http.Handler {
 
 	if deps.Credits != nil {
 		h.registerCreditsRoutes(deps.Credits)
+	}
+
+	if deps.Assets != nil {
+		h.registerAssetsRoutes(deps.Assets)
 	}
 
 	return withCORS(h.mux)
@@ -149,7 +156,7 @@ func withCORS(next http.Handler) http.Handler {
 		if origin != "" && allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		}
 		if r.Method == http.MethodOptions && origin != "" {

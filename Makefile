@@ -7,21 +7,29 @@ DATABASE_URL ?= postgres://thresh:thresh@localhost:5432/thresh?sslmode=disable
 AGENT_BASE_URL ?= http://localhost:8001
 BACKEND_ADDR ?= :8080
 NUXT_PUBLIC_BACKEND_BASE_URL ?= http://localhost:8080
+S3_ENDPOINT_URL ?= http://localhost:9000
+S3_REGION ?= us-east-1
+S3_BUCKET ?= thresh-assets
+S3_ACCESS_KEY_ID ?= thresh
+S3_SECRET_KEY ?= thresh-minio
 
 .PHONY: help dev dev-postgres dev-backend dev-agent dev-web test test-backend test-agent test-web build clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-18s %s\n", $$1, $$2}'
 
-dev: ## Boot everything: postgres + backend + agent + web (installs deps first)
+dev: ## Boot everything: postgres + minio + backend + agent + web (installs deps first)
 	@echo "==> Preparing dependencies…"
-	@docker compose up -d --wait postgres
+	@docker compose up -d --wait postgres minio
 	@(cd agent && uv sync --quiet)
 	@(cd web && [ -d node_modules ] || pnpm install --silent)
 	@echo "==> Starting agent sidecar on :8001…"
 	@(cd agent && uv run python -m thresh_agent > /tmp/thresh-agent.log 2>&1 &) ; sleep 2
 	@echo "==> Starting backend on :8080…"
-	@(cd backend && DATABASE_URL=$(DATABASE_URL) AGENT_BASE_URL=$(AGENT_BASE_URL) BACKEND_ADDR=$(BACKEND_ADDR) go run ./cmd/api > /tmp/thresh-backend.log 2>&1 &) ; sleep 2
+	@(cd backend && DATABASE_URL=$(DATABASE_URL) AGENT_BASE_URL=$(AGENT_BASE_URL) BACKEND_ADDR=$(BACKEND_ADDR) \
+		S3_ENDPOINT_URL=$(S3_ENDPOINT_URL) S3_REGION=$(S3_REGION) S3_BUCKET=$(S3_BUCKET) \
+		S3_ACCESS_KEY_ID=$(S3_ACCESS_KEY_ID) S3_SECRET_KEY=$(S3_SECRET_KEY) \
+		go run ./cmd/api > /tmp/thresh-backend.log 2>&1 &) ; sleep 2
 	@echo "==> Starting web on :3000…"
 	@(cd web && NUXT_PUBLIC_BACKEND_BASE_URL=$(NUXT_PUBLIC_BACKEND_BASE_URL) ./node_modules/.bin/nuxt dev > /tmp/thresh-web.log 2>&1 &)
 	@sleep 3

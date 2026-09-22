@@ -12,9 +12,11 @@ import (
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/agentclient"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/api"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/assets"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/config"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/objectstore"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/postgres"
 )
 
@@ -67,6 +69,32 @@ func run() error {
 		return err
 	}
 
+	// Object storage (ADR 0006): when configured, asset endpoints register;
+	// otherwise the backend serves membership + credits only. A reachable
+	// endpoint with a missing bucket is auto-created (dev convenience).
+	var assetsDeps *api.AssetsDeps
+	if cfg.S3.Enabled() {
+		blobs, err := objectstore.NewS3(ctx, objectstore.S3Config{
+			EndpointURL: cfg.S3.Endpoint,
+			Region:      cfg.S3.Region,
+			Bucket:      cfg.S3.Bucket,
+			AccessKeyID: cfg.S3.AccessKeyID,
+			SecretKey:   cfg.S3.SecretKey,
+		})
+		if err != nil {
+			return err
+		}
+		if err := blobs.EnsureBucket(ctx); err != nil {
+			return err
+		}
+		log.Printf("thresh-backend %s: object storage ready at %s (bucket %s)", version, cfg.S3.Endpoint, cfg.S3.Bucket)
+		assetsDeps = &api.AssetsDeps{
+			Service: assets.NewService(postgres.NewAssetsStore(pool), blobs, assets.NewPipeline(assets.PassThrough{})),
+		}
+	} else {
+		log.Printf("thresh-backend %s: S3_ENDPOINT_URL not set — asset endpoints disabled", version)
+	}
+
 	handler := api.NewHandler(api.Deps{
 		Agent:   agentclient.New(cfg.AgentBaseURL),
 		Version: version,
@@ -79,6 +107,7 @@ func run() error {
 				return postgres.SaveCreditRules(ctx, pool, rules)
 			},
 		},
+		Assets: assetsDeps,
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,
