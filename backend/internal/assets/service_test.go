@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syaikhipin/entrustdn-final/backend/internal/anonymize"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/assets"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/objectstore"
 )
@@ -20,7 +21,7 @@ func newService(t *testing.T) (*assets.Service, *assets.MemoryStore, *objectstor
 	t.Helper()
 	meta := assets.NewMemoryStore()
 	blobs := objectstore.NewMemory()
-	svc := assets.NewService(meta, blobs, assets.NewPipeline(assets.PassThrough{}))
+	svc := assets.NewService(meta, blobs, assets.NewPipeline(anonymize.NewStage(anonymize.NewMemoryMap())))
 	return svc, meta, blobs
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/agentclient"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/api"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/anonymize"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/assets"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/config"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
@@ -88,8 +89,12 @@ func run() error {
 			return err
 		}
 		log.Printf("thresh-backend %s: object storage ready at %s (bucket %s)", version, cfg.S3.Endpoint, cfg.S3.Bucket)
+		// The pseudonym map lives in Postgres beside the asset records —
+		// in-platform only (ADR 0005), never in delivered data.
+		pseudonyms := postgres.NewPseudonymMap(pool, cfg.PseudonymHashKey)
 		assetsDeps = &api.AssetsDeps{
-			Service: assets.NewService(postgres.NewAssetsStore(pool), blobs, assets.NewPipeline(assets.PassThrough{})),
+			Service: assets.NewService(postgres.NewAssetsStore(pool), blobs, assets.NewPipeline(anonymize.NewStage(pseudonyms))),
+			Pseudonyms: &api.PseudonymDeps{Map: pseudonyms},
 		}
 	} else {
 		log.Printf("thresh-backend %s: S3_ENDPOINT_URL not set — asset endpoints disabled", version)

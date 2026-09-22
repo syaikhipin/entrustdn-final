@@ -49,7 +49,7 @@ func (s *Service) Ingest(ctx context.Context, a *Asset, r io.Reader) (IngestResu
 		a.ObjectKey = objectKey(a.OrgID, a.ID)
 	}
 
-	piped, stages, err := s.pipeline.Run(r)
+	piped, stages, err := s.pipeline.RunFor(ctx, a.OrgID, a.Format, r)
 	if err != nil {
 		return IngestResult{}, err
 	}

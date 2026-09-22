@@ -33,6 +33,10 @@ type Config struct {
 	// only). Endpoint is required when assets are enabled; when Endpoint is
 	// empty the asset endpoints do not register.
 	S3 S3Config
+	// PseudonymHashKey keys the HMAC that protects stored pseudonym-map
+	// identifiers (ticket 05). Optional: when unset the database URL keys
+	// the HMAC so dev needs no extra setup.
+	PseudonymHashKey string
 }
 
 // S3Config carries the S3-compatible connection facts (MinIO in dev).
@@ -98,6 +102,8 @@ platform records which version you accepted and when.`)
 			return Config{}, fmt.Errorf("S3_ENDPOINT_URL is set but S3_ACCESS_KEY_ID / S3_SECRET_KEY / S3_BUCKET are incomplete")
 		}
 	}
+
+	cfg.PseudonymHashKey = os.Getenv("PSEUDONYM_HASH_KEY")
 
 	return cfg, nil
 }

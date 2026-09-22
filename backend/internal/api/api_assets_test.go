@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/agentclient"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/anonymize"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/api"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/assets"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
@@ -35,14 +36,15 @@ func newAssetsServer(t *testing.T) (*httptest.Server, *membership.MemoryStore, *
 	}
 	provisionAdmin(t, memStore, "admin@thresh.dev")
 	blobs := objectstore.NewMemory()
-	svc := assets.NewService(assets.NewMemoryStore(), blobs, assets.NewPipeline(assets.PassThrough{}))
+	pseudonyms := anonymize.NewMemoryMap()
+	svc := assets.NewService(assets.NewMemoryStore(), blobs, assets.NewPipeline(anonymize.NewStage(pseudonyms)))
 	mail := &bytes.Buffer{}
 	srv := httptest.NewServer(api.NewHandler(api.Deps{
-		Agent:   agentclient.New(agent.URL),
-		Version: "test-backend",
-		Store:   memStore,
-		Mail:    mailsink.NewLogSink(mail),
-		Assets:  &api.AssetsDeps{Service: svc},
+		Agent:      agentclient.New(agent.URL),
+		Version:    "test-backend",
+		Store:      memStore,
+		Mail:       mailsink.NewLogSink(mail),
+		Assets:     &api.AssetsDeps{Service: svc, Pseudonyms: &api.PseudonymDeps{Map: pseudonyms}},
 	}))
 	t.Cleanup(srv.Close)
 	return srv, memStore, mail, blobs

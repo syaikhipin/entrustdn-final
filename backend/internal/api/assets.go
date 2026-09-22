@@ -7,9 +7,11 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/syaikhipin/entrustdn-final/backend/internal/anonymize"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/assets"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/membership"
 )
@@ -23,6 +25,14 @@ import (
 // AssetsDeps carries the collaborators the asset endpoints need.
 type AssetsDeps struct {
 	Service *assets.Service
+	// Pseudonyms, when set, registers the org's pseudonym-map endpoints
+	// (ticket 05): list what the map holds and erase it (the GDPR surface).
+	Pseudonyms *PseudonymDeps
+}
+
+// PseudonymDeps carries the pseudonym-map collaborator (ticket 05).
+type PseudonymDeps struct {
+	Map anonymize.Map
 }
 
 // registerAssetsRoutes wires the asset endpoints when configured.
@@ -34,6 +44,10 @@ func (h *Handler) registerAssetsRoutes(deps *AssetsDeps) {
 	h.mux.HandleFunc("GET /api/v1/assets/{id}/content", h.handleDownloadAsset)
 	h.mux.HandleFunc("PATCH /api/v1/assets/{id}", h.handleUpdateAsset)
 	h.mux.HandleFunc("DELETE /api/v1/assets/{id}", h.handleDeleteAsset)
+	if deps.Pseudonyms != nil {
+		h.mux.HandleFunc("GET /api/v1/pseudonyms", h.handleListPseudonyms)
+		h.mux.HandleFunc("DELETE /api/v1/pseudonyms", h.handleErasePseudonyms)
+	}
 }
 
 // assetsHandlers holds the resolved collaborators for the asset routes.
@@ -372,4 +386,59 @@ func (h *Handler) handleDownloadAsset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	// Stream, never buffer (ADR 0006).
 	_, _ = io.Copy(w, blob.Body)
+}
+
+// handleListPseudonyms shows the org's pseudonym map: kinds and pseudonyms
+// only — raw identifiers are not stored in readable form and the map is
+// never exported (ADR 0005).
+func (h *Handler) handleListPseudonyms(w http.ResponseWriter, r *http.Request) {
+	org, ok := h.requireOrg(w, r)
+	if !ok {
+		return
+	}
+	m := h.assets.deps.Pseudonyms.Map
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 500 {
+			apiError(w, http.StatusBadRequest, "limit must be an integer between 1 and 500")
+			return
+		}
+		limit = n
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			apiError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+			return
+		}
+		offset = n
+	}
+	entries, total, err := m.Entries(r.Context(), org.ID, limit, offset)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "failed to list the pseudonym map")
+		return
+	}
+	docs := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		docs = append(docs, map[string]any{"kind": e.Kind, "pseudonym": e.Pseudonym})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"pseudonyms": docs, "total": total})
+}
+
+// handleErasePseudonyms wipes the org's whole pseudonym map — the GDPR
+// erasure surface (ADR 0005). Every erased identifier re-mints on next use,
+// so previously delivered pseudonyms no longer link to anything.
+func (h *Handler) handleErasePseudonyms(w http.ResponseWriter, r *http.Request) {
+	org, ok := h.requireOrg(w, r)
+	if !ok {
+		return
+	}
+	m := h.assets.deps.Pseudonyms.Map
+	if err := m.EraseOrg(r.Context(), org.ID); err != nil {
+		apiError(w, http.StatusInternalServerError, "failed to erase the pseudonym map")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"erased": true})
 }

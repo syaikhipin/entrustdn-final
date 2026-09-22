@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // Farmer Organization home: the shared-data dashboard (ticket 04). Upload
-// streams through the backend (ADR 0006); every listed asset records the
-// anonymize stage from ingest (ADR 0005, pass-through until ticket 05).
+// streams through the backend (ADR 0006) and the anonymize stage cleans
+// identifiers at ingest (ticket 05); downloads stream from the platform,
+// never from raw storage. The org's pseudonym map is listed below and
+// erasable — the GDPR surface (ADR 0005).
 import { useSession } from "~/composables/useSession";
 import {
   assetDownloadURL,
@@ -14,6 +16,7 @@ import {
   uploadAsset,
   type Asset,
 } from "~/assets";
+import { erasePseudonyms, listPseudonyms, type PseudonymList } from "~/pseudonyms";
 
 const { token, me, account, restore } = useSession();
 const backendURL = useBackendURL();
@@ -24,6 +27,10 @@ const loadError = ref<string | null>(null);
 const notice = ref<string | null>(null);
 const error = ref<string | null>(null);
 const busy = ref(false);
+
+// Pseudonym map state (ticket 05).
+const pseudonyms = ref<PseudonymList | null>(null);
+const confirmingErase = ref(false);
 
 // Upload form state.
 const file = ref<File | null>(null);
@@ -47,7 +54,10 @@ const confirmingDelete = ref<string | null>(null);
 onMounted(async () => {
   await restore();
   ready.value = true;
-  if (token.value) await refreshAssets();
+  if (token.value) {
+    await refreshAssets();
+    await refreshPseudonyms();
+  }
 });
 
 // The guard waits for restore(): before it finishes, a refreshing user has
@@ -64,6 +74,32 @@ async function refreshAssets() {
     assets.value = await listAssets(backendURL, token.value);
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function refreshPseudonyms() {
+  if (!token.value) return;
+  try {
+    pseudonyms.value = await listPseudonyms(backendURL, token.value);
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+async function submitErasePseudonyms() {
+  if (!token.value) return;
+  busy.value = true;
+  error.value = null;
+  try {
+    await erasePseudonyms(backendURL, token.value);
+    confirmingErase.value = false;
+    notice.value =
+      "Pseudonym map erased — every identifier anonymized so far gets a fresh pseudonym next time it appears.";
+    await refreshPseudonyms();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -357,6 +393,43 @@ async function openDownload(a: Asset) {
             </template>
           </tbody>
         </table>
+      </section>
+
+      <!-- Pseudonym map (ticket 05) -->
+      <section class="card">
+        <h3>Pseudonym map</h3>
+        <p>
+          When your data is anonymized, identifiers (names, phones, emails)
+          are replaced with opaque pseudonyms that only this map can trace —
+          the map stays inside the platform and is never delivered with your
+          data. Erasing it is the erasure request under GDPR: every erased
+          identifier gets a fresh pseudonym next time it appears, so old
+          pseudonyms stop linking.
+        </p>
+        <p v-if="pseudonyms" class="hint">
+          {{ pseudonyms.total }}
+          {{ pseudonyms.total === 1 ? "identifier" : "identifiers" }} held for
+          your organization.
+        </p>
+        <div v-if="pseudonyms && pseudonyms.entries.length" class="edit-actions">
+          <button class="danger" :disabled="busy" @click="confirmingErase = true">
+            Erase the whole map
+          </button>
+        </div>
+        <template v-if="confirmingErase">
+          <p>
+            Erase every pseudonym for your organization? Old pseudonyms in
+            already delivered data will no longer link to anything, and each
+            identifier is re-pseudonymized fresh on its next appearance. This
+            cannot be undone.
+          </p>
+          <div class="edit-actions">
+            <button class="danger" :disabled="busy" @click="submitErasePseudonyms">
+              Yes, erase the map
+            </button>
+            <button class="secondary" @click="confirmingErase = false">Cancel</button>
+          </div>
+        </template>
       </section>
 
       <section v-if="me.tos" class="card">
