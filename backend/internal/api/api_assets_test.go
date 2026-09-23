@@ -40,11 +40,11 @@ func newAssetsServer(t *testing.T) (*httptest.Server, *membership.MemoryStore, *
 	svc := assets.NewService(assets.NewMemoryStore(), blobs, assets.NewPipeline(anonymize.NewStage(pseudonyms)))
 	mail := &bytes.Buffer{}
 	srv := httptest.NewServer(api.NewHandler(api.Deps{
-		Agent:      agentclient.New(agent.URL),
-		Version:    "test-backend",
-		Store:      memStore,
-		Mail:       mailsink.NewLogSink(mail),
-		Assets:     &api.AssetsDeps{Service: svc, Pseudonyms: &api.PseudonymDeps{Map: pseudonyms}},
+		Agent:   agentclient.New(agent.URL),
+		Version: "test-backend",
+		Store:   memStore,
+		Mail:    mailsink.NewLogSink(mail),
+		Assets:  &api.AssetsDeps{Service: svc, Pseudonyms: &api.PseudonymDeps{Map: pseudonyms}},
 	}))
 	t.Cleanup(srv.Close)
 	return srv, memStore, mail, blobs

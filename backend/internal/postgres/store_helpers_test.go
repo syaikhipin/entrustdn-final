@@ -32,7 +32,8 @@ func openCleanTestDB(t *testing.T, url string) *pgxpool.Pool {
 	_, err = pool.Exec(ctx, `
 		TRUNCATE inference_charge_details, ledger_entries, ledger_movements,
 		         pricing_rules, pseudonym_maps, sessions, tos_acceptances,
-		         verification_tokens, tos_versions, accounts CASCADE`)
+		         verification_tokens, tos_versions, taxonomy_terms,
+		         accounts CASCADE`)
 	if err != nil {
 		t.Fatalf("failed to clean membership tables: %v", err)
 	}

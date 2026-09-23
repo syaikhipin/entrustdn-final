@@ -1,21 +1,42 @@
 <script setup lang="ts">
 // Data Consumer home: identity, the provable TOS record, and the spend
 // view — balance and entry history derived from the Ledger (ticket 03).
-// The catalog and Requests arrive in later tickets.
-import { errFrom, fetchMyCredits, formatCredits, type CreditsView } from "~/credits";
+// Ticket 06 adds the catalog: every shared asset with its taxonomy
+// categories, facet filtering, and the cached price from the current price
+// book. Requests (buying) arrive in later tickets.
+import { errFrom, fetchMyCredits, formatCredits, formatMicros, type CreditsView } from "~/credits";
+import { formatBytes } from "~/assets";
+import {
+  fetchCatalog,
+  formatConfidence,
+  TAXONOMY_CATEGORIES,
+  type Catalog,
+  type TaxonomyCategory,
+} from "~/taxonomy";
 import { useSession } from "~/composables/useSession";
 
 const backendURL = useBackendURL();
-const { token, account, restore } = useSession();
+const { token, me, account, restore } = useSession();
 
 const ready = ref(false);
 const credits = ref<CreditsView | null>(null);
 const error = ref<string | null>(null);
 
+// Catalog state (ticket 06). Facet selection is one term per axis; the
+// consumer narrows the catalog client-side against the whole-catalog facet
+// counts.
+const catalog = ref<Catalog | null>(null);
+const catalogError = ref<string | null>(null);
+const picked = ref<Partial<Record<TaxonomyCategory, string>>>({});
+const query = ref("");
+
 onMounted(async () => {
   await restore();
   ready.value = true;
-  if (token.value) await load();
+  if (token.value) {
+    await load();
+    await loadCatalog();
+  }
 });
 
 // The guard waits for restore(): before it finishes, a refreshing user has
@@ -32,6 +53,67 @@ async function load() {
   } catch (e) {
     error.value = e instanceof Error ? e.message : errFrom(e);
   }
+}
+
+async function loadCatalog() {
+  if (!token.value) return;
+  catalogError.value = null;
+  try {
+    catalog.value = await fetchCatalog(backendURL, token.value);
+  } catch (e) {
+    catalogError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+// facetsInOrder lists the catalog's active facets along the fixed axes so
+// the filter panel renders deterministically.
+const facetSections = computed(() => {
+  if (!catalog.value) return [];
+  return TAXONOMY_CATEGORIES.filter((c) => catalog.value!.facets[c]?.length).map((c) => ({
+    category: c,
+    values: catalog.value!.facets[c]!,
+  }));
+});
+
+// matches reports whether one entry passes the current facet picks and the
+// free-text query.
+function matches(categories: { category: TaxonomyCategory; value: string; label: string }[]): boolean {
+  for (const [cat, value] of Object.entries(picked.value)) {
+    if (value && !categories.some((a) => a.category === cat && a.value === value)) return false;
+  }
+  return true;
+}
+
+// filteredEntries applies the facet picks and the text query to the catalog.
+const filteredEntries = computed(() => {
+  if (!catalog.value) return [];
+  const q = query.value.trim().toLowerCase();
+  return catalog.value.entries.filter((e) => {
+    if (!matches(e.categories)) return false;
+    if (q && !`${e.name} ${e.description}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+});
+
+function categoryLabel(category: TaxonomyCategory): string {
+  return category.replaceAll("_", " ");
+}
+
+// pickedFilterCount tracks whether any filter is active (facet or text) so
+// the "clear" affordance only shows when it can do something.
+const hasFilters = computed(
+  () => query.value.trim() !== "" || Object.values(picked.value).some((v) => v),
+);
+
+// maybeUnpick toggles a facet radio off when the consumer clicks the
+// selected term again (radios alone can't go back to "all").
+function maybeUnpick(category: TaxonomyCategory, value: string) {
+  if (picked.value[category] === value) picked.value[category] = undefined;
+}
+
+function clearFilters() {
+  picked.value = {};
+  query.value = "";
 }
 
 // kindLabel translates a ledger kind for the history list.
@@ -81,9 +163,85 @@ function myDelta(mov: CreditsView["movements"][number]): number {
         <h2>Data Consumer home</h2>
         <p>
           Welcome, <strong>{{ me.account.displayName }}</strong
-          >. The catalog and Requests arrive in the next slices — this is your
-          role's home.
+          >. Browse the catalog below — every shared asset carries its
+          taxonomy categories and the price the current book quotes. Requests
+          (buying) arrive in the next slices.
         </p>
+      </section>
+
+      <!-- Catalog (ticket 06) -->
+      <section class="card">
+        <h3>Catalog</h3>
+        <p class="hint">
+          Filter by the platform's taxonomy facets, or search names and
+          descriptions. Prices shown are cached from the current price book —
+          entitlement to open the data arrives with Requests.
+        </p>
+        <p v-if="catalogError" class="error-text">{{ catalogError }}</p>
+        <p v-if="!catalog && !catalogError" class="hint">Loading catalog…</p>
+        <template v-if="catalog">
+          <div class="catalog-toolbar">
+            <input v-model="query" type="search" placeholder="Search the catalog…" class="search" />
+            <button v-if="hasFilters" class="secondary" @click="clearFilters">Clear filters</button>
+          </div>
+          <div v-if="facetSections.length" class="facets">
+            <div v-for="section in facetSections" :key="section.category" class="facet">
+              <h4>{{ categoryLabel(section.category) }}</h4>
+              <label v-for="v in section.values" :key="v.value" class="facet-value">
+                <input
+                  v-model="picked[section.category]"
+                  type="radio"
+                  name=""
+                  :value="v.value"
+                  @change="maybeUnpick(section.category, v.value)"
+                />
+                {{ v.label }} <span class="hint">({{ v.count }})</span>
+              </label>
+            </div>
+          </div>
+
+          <p v-if="filteredEntries.length === 0" class="hint">
+            Nothing matches these filters yet.
+          </p>
+          <table v-else class="ledger">
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Categories</th>
+                <th class="num">Size</th>
+                <th class="num">Price</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="e in filteredEntries" :key="e.id">
+                <td>
+                  <strong>{{ e.name }}</strong>
+                  <p v-if="e.description" class="hint">{{ e.description }}</p>
+                  <p class="hint">
+                    {{ e.format }} · passed {{ e.pipeline.join(" → ") }}
+                    <template v-if="e.provenance.source"> · source: {{ e.provenance.source }}</template>
+                  </p>
+                </td>
+                <td class="cats">
+                  <span
+                    v-for="as in e.categories"
+                    :key="as.category"
+                    class="pill"
+                    :title="`${categoryLabel(as.category)} · ${as.source} (${formatConfidence(as.confidence)})`"
+                    >{{ as.label }}</span
+                  >
+                  <span v-if="e.categories.length === 0" class="hint">uncategorized</span>
+                </td>
+                <td class="num">{{ formatBytes(e.sizeBytes) }}</td>
+                <td class="num">
+                  {{ e.cachedPriceMicros > 0 ? formatMicros(e.cachedPriceMicros) : "—" }}
+                </td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
       </section>
 
       <section class="card">
@@ -166,5 +324,38 @@ function myDelta(mov: CreditsView["movements"][number]): number {
 }
 .gain {
   color: var(--ok, #1d7a46);
+}
+.catalog-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.search {
+  flex: 1;
+}
+.facets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+.facet h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.facet-value {
+  display: block;
+  font-size: 0.92rem;
+  margin: 0.15rem 0;
+}
+.facet-value input {
+  margin-right: 0.35rem;
+}
+.cats .pill {
+  margin-right: 0.3rem;
 }
 </style>

@@ -11,14 +11,15 @@ import (
 	"time"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/agentclient"
-	"github.com/syaikhipin/entrustdn-final/backend/internal/api"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/anonymize"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/api"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/assets"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/config"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/objectstore"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/postgres"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/taxonomy"
 )
 
 // version is the backend's version banner, stamped at build time or "dev".
@@ -74,6 +75,7 @@ func run() error {
 	// otherwise the backend serves membership + credits only. A reachable
 	// endpoint with a missing bucket is auto-created (dev convenience).
 	var assetsDeps *api.AssetsDeps
+	var taxonomyDeps *api.TaxonomyDeps
 	if cfg.S3.Enabled() {
 		blobs, err := objectstore.NewS3(ctx, objectstore.S3Config{
 			EndpointURL: cfg.S3.Endpoint,
@@ -92,8 +94,24 @@ func run() error {
 		// The pseudonym map lives in Postgres beside the asset records —
 		// in-platform only (ADR 0005), never in delivered data.
 		pseudonyms := postgres.NewPseudonymMap(pool, cfg.PseudonymHashKey)
+
+		// Taxonomy (ticket 06): seed the Irish vocabulary on first boot,
+		// then let the ingest service classify against the taxonomy service
+		// itself — it reloads the vocabulary per upload, so admin-created
+		// terms and keyword edits reach the next ingest without a restart.
+		taxStore := postgres.NewTaxonomyStore(pool)
+		if err := postgres.SeedTaxonomyIfEmpty(ctx, pool); err != nil {
+			return err
+		}
+		taxSvc := taxonomy.NewService(taxStore, postgres.NewAssetsStore(pool))
+		taxonomyDeps = &api.TaxonomyDeps{
+			Service: taxSvc,
+			Rules:   postgres.CreditRulesLoader(pool),
+		}
+
 		assetsDeps = &api.AssetsDeps{
-			Service: assets.NewService(postgres.NewAssetsStore(pool), blobs, assets.NewPipeline(anonymize.NewStage(pseudonyms))),
+			Service: assets.NewService(postgres.NewAssetsStore(pool), blobs, assets.NewPipeline(anonymize.NewStage(pseudonyms))).
+				WithCategorizer(taxSvc),
 			Pseudonyms: &api.PseudonymDeps{Map: pseudonyms},
 		}
 	} else {
@@ -112,7 +130,8 @@ func run() error {
 				return postgres.SaveCreditRules(ctx, pool, rules)
 			},
 		},
-		Assets: assetsDeps,
+		Assets:   assetsDeps,
+		Taxonomy: taxonomyDeps,
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,

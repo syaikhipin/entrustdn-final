@@ -3,7 +3,10 @@
 // streams through the backend (ADR 0006) and the anonymize stage cleans
 // identifiers at ingest (ticket 05); downloads stream from the platform,
 // never from raw storage. The org's pseudonym map is listed below and
-// erasable — the GDPR surface (ADR 0005).
+// erasable — the GDPR surface (ADR 0005). Ticket 06 adds the taxonomy
+// surfaces: uploads auto-categorize, and the org corrects categories on its
+// own assets (the correction is the full desired set — the truth, not a
+// patch).
 import { useSession } from "~/composables/useSession";
 import {
   assetDownloadURL,
@@ -17,6 +20,13 @@ import {
   type Asset,
 } from "~/assets";
 import { erasePseudonyms, listPseudonyms, type PseudonymList } from "~/pseudonyms";
+import {
+  fetchTerms,
+  setCategories,
+  TAXONOMY_CATEGORIES,
+  type TaxonomyCategory,
+  type Term,
+} from "~/taxonomy";
 
 const { token, me, account, restore } = useSession();
 const backendURL = useBackendURL();
@@ -51,12 +61,21 @@ const editNotes = ref("");
 // Delete confirmation state.
 const confirmingDelete = ref<string | null>(null);
 
+// Taxonomy state (ticket 06): the public vocabulary, and per-asset
+// correction state — the open asset id, each category's chosen term, and
+// the corrections being applied.
+const terms = ref<Term[]>([]);
+const correcting = ref<string | null>(null);
+const correctionPicks = ref<Partial<Record<TaxonomyCategory, string>>>({});
+const correctionError = ref<string | null>(null);
+
 onMounted(async () => {
   await restore();
   ready.value = true;
   if (token.value) {
     await refreshAssets();
     await refreshPseudonyms();
+    await refreshTerms();
   }
 });
 
@@ -83,6 +102,54 @@ async function refreshPseudonyms() {
     pseudonyms.value = await listPseudonyms(backendURL, token.value);
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+// The vocabulary is public; its labels drive the correction pickers.
+async function refreshTerms() {
+  try {
+    terms.value = await fetchTerms(backendURL);
+  } catch (e) {
+    // A missing vocabulary degrades to upload-only: corrections hide.
+    terms.value = [];
+    loadError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+// termsFor lists the vocabulary under one axis for a picker.
+function termsFor(category: TaxonomyCategory): Term[] {
+  return terms.value.filter((t) => t.category === category);
+}
+
+// startCorrection opens the correction row seeded with the asset's current
+// assignments (the classifier's suggestions included — the org edits from
+// where the machine left off).
+function startCorrection(a: Asset) {
+  correcting.value = a.id;
+  correctionError.value = null;
+  const picks: Partial<Record<TaxonomyCategory, string>> = {};
+  for (const as of a.categories) picks[as.category] = as.termId;
+  correctionPicks.value = picks;
+}
+
+// submitCorrection PUTs the full desired set — untouched axes keep their
+// current pick, cleared axes drop their assignment.
+async function submitCorrection(assetId: string) {
+  if (!token.value) return;
+  busy.value = true;
+  correctionError.value = null;
+  const corrections = Object.entries(correctionPicks.value)
+    .filter(([, termId]) => termId)
+    .map(([category, termId]) => ({ category: category as TaxonomyCategory, termId: termId! }));
+  try {
+    await setCategories(backendURL, token.value, assetId, corrections);
+    correcting.value = null;
+    notice.value = "Categories corrected — the catalog reflects the new labels immediately.";
+    await refreshAssets();
+  } catch (e) {
+    correctionError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -317,6 +384,7 @@ async function openDownload(a: Asset) {
               <th>Name</th>
               <th>Format</th>
               <th>Size</th>
+              <th>Categories</th>
               <th>Anonymization</th>
               <th>Uploaded</th>
               <th></th>
@@ -337,18 +405,53 @@ async function openDownload(a: Asset) {
                 </td>
                 <td><span class="pill ok">{{ a.format }}</span></td>
                 <td>{{ formatBytes(a.sizeBytes) }}</td>
+                <td class="cats">
+                  <template v-if="a.categories.length">
+                    <span
+                      v-for="as in a.categories"
+                      :key="as.category"
+                      class="pill"
+                      :title="`${as.category} · ${as.source} (${Math.round(as.confidence * 100)}%)`"
+                      >{{ as.label }}</span
+                    >
+                  </template>
+                  <span v-else class="hint">uncategorized</span>
+                </td>
                 <td>
                   <span class="pill">{{ a.pipeline.join(" → ") }}</span>
                 </td>
                 <td>{{ formatDate(a.createdAt) }}</td>
                 <td class="actions">
                   <a href="#" @click.prevent="openDownload(a)">Download</a>
+                  <button v-if="terms.length" class="secondary" @click="startCorrection(a)">Categories</button>
                   <button class="secondary" @click="startEdit(a)">Edit</button>
                   <button class="danger" @click="confirmingDelete = a.id">Delete</button>
                 </td>
               </tr>
+              <tr v-if="correcting === a.id">
+                <td :colspan="terms.length ? 7 : 6">
+                  <form class="edit-form" @submit.prevent="submitCorrection(a.id)">
+                    <p class="hint">
+                      Correct what the classifier guessed — the saved set
+                      replaces every category on this asset.
+                    </p>
+                    <label v-for="cat in TAXONOMY_CATEGORIES" :key="cat">
+                      {{ cat.replaceAll("_", " ") }}
+                      <select v-model="correctionPicks[cat]">
+                        <option value="">— none —</option>
+                        <option v-for="t in termsFor(cat)" :key="t.id" :value="t.id">{{ t.label }}</option>
+                      </select>
+                    </label>
+                    <p v-if="correctionError" class="error-text">{{ correctionError }}</p>
+                    <div class="edit-actions">
+                      <button class="primary" type="submit" :disabled="busy">Save categories</button>
+                      <button class="secondary" type="button" @click="correcting = null">Cancel</button>
+                    </div>
+                  </form>
+                </td>
+              </tr>
               <tr v-if="editing === a.id">
-                <td colspan="6">
+                <td colspan="7">
                   <form class="edit-form" @submit.prevent="submitEdit(a.id)">
                     <label>
                       Name
@@ -378,7 +481,7 @@ async function openDownload(a: Asset) {
                 </td>
              </tr>
               <tr v-if="confirmingDelete === a.id">
-                <td colspan="6">
+                <td colspan="7">
                   <p>
                     Delete <strong>{{ a.name }}</strong
                     >? The stored file is removed from the platform along with
@@ -480,5 +583,8 @@ table.assets td {
 .pill:not(.ok):not(.warn):not(.bad) {
   background: var(--bg);
   color: var(--muted);
+}
+.cats .pill {
+  margin-right: 0.3rem;
 }
 </style>

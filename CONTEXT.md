@@ -45,6 +45,18 @@ _Avoid_: order, task, job
 The verifiable origin metadata attached to every data item and memory trace — who contributed, when, from which source — used as a trust dimension in ranking.
 _Avoid_: audit trail, lineage, history
 
+**Taxonomy**:
+The Platform Admin's controlled vocabulary for describing Data Assets: six fixed axes — crop, region, growth stage, intervention, outcome, data type — each holding terms with classifier keywords. Seeded for Irish agriculture; term identity (axis and slug) is immutable once created.
+_Avoid_: category list, tagging scheme, ontology
+
+**Assignment**:
+One taxonomy stamp on a Data Item: the term, its denormalized label, the confidence, and the source — `classifier` (machine, at ingest) or `org` (the owning Farmer Organization's correction, confidence 1). The org's correction replaces the whole set: it is the truth, not a patch.
+_Avoid_: tag, label (ambiguous with the term's label), category (ambiguous with the axis)
+
+**Catalog**:
+The Data Consumer's read view across every Farmer Organization's shared Data Assets: entries with their Assignments, facet counts computed from the live inventory, and each asset's cached price from the current price book. Facet filtering happens client-side against those counts.
+_Avoid_: marketplace, listings, store
+
 ### Memory
 
 **Memory Provider**:

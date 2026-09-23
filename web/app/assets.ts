@@ -5,6 +5,7 @@
 // paths in any document — the parsers refuse an object_key outright).
 
 import { apiCall, authedHeader, errFrom } from "~/api";
+import { parseAssignment, type Assignment } from "~/taxonomy";
 
 export { errFrom };
 
@@ -22,6 +23,7 @@ export interface Asset {
   format: string;
   pipeline: string[];
   provenance: Provenance;
+  categories: Assignment[];
   createdAt: string;
   updatedAt: string;
 }
@@ -56,6 +58,7 @@ export function parseAsset(doc: unknown): Asset {
     format: d.format,
     pipeline: d.pipeline.map(String),
     provenance: parseProvenance(d.provenance),
+    categories: Array.isArray(d.categories) ? d.categories.map(parseAssignment) : [],
     createdAt: String(d.created_at ?? ""),
     updatedAt: String(d.updated_at ?? ""),
   };

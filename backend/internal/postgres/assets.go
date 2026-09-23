@@ -11,11 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/assets"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/taxonomy"
 )
 
 // The Postgres implementation of assets.Store (ticket 04; ADR 0007: the
 // system of record). Blob bytes never come here — only metadata; the
-// pipeline and provenance documents ride as JSONB.
+// pipeline, provenance, and category-assignment documents ride as JSONB.
 
 // AssetsStore implements assets.Store over the shared pool.
 type AssetsStore struct {
@@ -30,13 +31,13 @@ var _ assets.Store = (*AssetsStore)(nil)
 
 const assetColumns = `
 	id, org_id, name, description, size_bytes, format, pipeline, provenance,
-	object_key, created_at, updated_at`
+	categories, object_key, created_at, updated_at`
 
 func (s *AssetsStore) scanAsset(row pgx.Row) (assets.Asset, error) {
 	var a assets.Asset
-	var pipeline, provenance []byte
+	var pipeline, provenance, categories []byte
 	err := row.Scan(&a.ID, &a.OrgID, &a.Name, &a.Description, &a.SizeBytes,
-		&a.Format, &pipeline, &provenance, &a.ObjectKey, &a.CreatedAt, &a.UpdatedAt)
+		&a.Format, &pipeline, &provenance, &categories, &a.ObjectKey, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return assets.Asset{}, err
 	}
@@ -48,6 +49,11 @@ func (s *AssetsStore) scanAsset(row pgx.Row) (assets.Asset, error) {
 		return assets.Asset{}, fmt.Errorf("decode provenance for %s: %w", a.ID, err)
 	}
 	a.Provenance = prov
+	if len(categories) > 0 {
+		if err := json.Unmarshal(categories, &a.Categories); err != nil {
+			return assets.Asset{}, fmt.Errorf("decode categories for %s: %w", a.ID, err)
+		}
+	}
 	return a, nil
 }
 
@@ -92,6 +98,10 @@ func (s *AssetsStore) CreateAsset(ctx context.Context, a *assets.Asset) error {
 	if err != nil {
 		return fmt.Errorf("encode pipeline: %w", err)
 	}
+	categories, err := encodeCategories(a.Categories)
+	if err != nil {
+		return fmt.Errorf("encode categories: %w", err)
+	}
 	now := time.Now().UTC()
 	if a.CreatedAt.IsZero() {
 		a.CreatedAt = now
@@ -101,10 +111,10 @@ func (s *AssetsStore) CreateAsset(ctx context.Context, a *assets.Asset) error {
 	}
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO data_assets
-			(id, org_id, name, description, size_bytes, format, pipeline, provenance, object_key, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			(id, org_id, name, description, size_bytes, format, pipeline, provenance, categories, object_key, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		a.ID, a.OrgID, a.Name, a.Description, a.SizeBytes, a.Format,
-		pipeline, prov, a.ObjectKey, a.CreatedAt, a.UpdatedAt)
+		pipeline, prov, categories, a.ObjectKey, a.CreatedAt, a.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert data asset: %w", err)
 	}
@@ -139,6 +149,27 @@ func (s *AssetsStore) AssetsByOrg(ctx context.Context, orgID string) ([]assets.A
 	return out, rows.Err()
 }
 
+// AllAssets lists every org's records, newest first — the catalog's scan
+// (ticket 06).
+func (s *AssetsStore) AllAssets(ctx context.Context) ([]assets.Asset, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+assetColumns+` FROM data_assets ORDER BY created_at DESC, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list all assets: %w", err)
+	}
+	defer rows.Close()
+
+	var out []assets.Asset
+	for rows.Next() {
+		a, err := s.scanAsset(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan asset: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // UpdateAssetMeta rewrites the editable fields; immutable columns (size,
 // format, pipeline, object key) are never touched.
 func (s *AssetsStore) UpdateAssetMeta(ctx context.Context, a assets.Asset) error {
@@ -146,11 +177,15 @@ func (s *AssetsStore) UpdateAssetMeta(ctx context.Context, a assets.Asset) error
 	if err != nil {
 		return fmt.Errorf("encode provenance: %w", err)
 	}
+	categories, err := encodeCategories(a.Categories)
+	if err != nil {
+		return fmt.Errorf("encode categories: %w", err)
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE data_assets
-		SET name = $2, description = $3, provenance = $4, updated_at = now()
+		SET name = $2, description = $3, provenance = $4, categories = $5, updated_at = now()
 		WHERE id = $1`,
-		a.ID, a.Name, a.Description, prov)
+		a.ID, a.Name, a.Description, prov, categories)
 	if err != nil {
 		return fmt.Errorf("update data asset: %w", err)
 	}
@@ -158,6 +193,49 @@ func (s *AssetsStore) UpdateAssetMeta(ctx context.Context, a assets.Asset) error
 		return fmt.Errorf("%w: %s", assets.ErrNotFound, a.ID)
 	}
 	return nil
+}
+
+// encodeCategories renders the assignment set as the JSONB document; an
+// empty set is [] (never null — the column and the parsers both expect an
+// array).
+func encodeCategories(cats []taxonomy.Assignment) ([]byte, error) {
+	if len(cats) == 0 {
+		return []byte("[]"), nil
+	}
+	out, err := json.Marshal(cats)
+	if err != nil {
+		// Assignment holds only JSON-marshalable fields, but a failure here
+		// must surface: writing [] would silently erase every assignment on
+		// an UpdateAssetMeta.
+		return nil, fmt.Errorf("marshal categories: %w", err)
+	}
+	return out, nil
+}
+
+// AssignmentsByTerm counts, across all assets, the assignments naming each
+// term ID — the in-use guard behind taxonomy term deletes (ticket 06).
+// Counting per asset, not per assignment occurrence, so one asset carrying
+// a term twice (impossible after validation, but cheap to be safe) still
+// reads as one use.
+func (s *AssetsStore) AssignmentsByTerm(ctx context.Context) (map[string]int, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT a->>'term_id' AS term_id, count(*) AS uses
+		FROM data_assets, jsonb_array_elements(categories) AS a
+		GROUP BY 1`)
+	if err != nil {
+		return nil, fmt.Errorf("count assignments by term: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var termID string
+		var uses int
+		if err := rows.Scan(&termID, &uses); err != nil {
+			return nil, fmt.Errorf("scan assignment count: %w", err)
+		}
+		out[termID] = uses
+	}
+	return out, rows.Err()
 }
 
 // DeleteAsset removes the record and returns it — the caller needs

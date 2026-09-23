@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Platform Admin home: the Farmer Organization application queue
-// (approve/reject), TOS publishing, and the credits desk (ticket 03) —
-// grants, signed adjustments, automatically-priced test charges, and the
-// price book.
+// (approve/reject), TOS publishing, the credits desk (ticket 03), and the
+// taxonomy workbench (ticket 06) — the vocabulary every upload is
+// auto-categorized against.
 import { decideApplication, errFrom, listApplications, publishTos, type Application } from "~/auth";
 import {
   adminAdjust,
@@ -13,6 +13,15 @@ import {
   savePricing,
   type PricingRules,
 } from "~/credits";
+import {
+  createTerm,
+  deleteTerm,
+  fetchTerms,
+  updateTerm,
+  TAXONOMY_CATEGORIES,
+  type TaxonomyCategory,
+  type Term,
+} from "~/taxonomy";
 import { useSession } from "~/composables/useSession";
 
 const backendURL = useBackendURL();
@@ -51,6 +60,17 @@ const pricing = ref<PricingRules | null>(null);
 const pricingNotice = ref<string | null>(null);
 const pricingError = ref<string | null>(null);
 
+// Taxonomy workbench state (ticket 06).
+const terms = ref<Term[]>([]);
+const taxError = ref<string | null>(null);
+const taxNotice = ref<string | null>(null);
+const newCategory = ref<TaxonomyCategory>("crop");
+const newLabel = ref("");
+const newKeywords = ref("");
+const editingTerm = ref<Term | null>(null);
+const editLabel = ref("");
+const editKeywords = ref("");
+
 onMounted(async () => {
   await restore();
   ready.value = true;
@@ -65,6 +85,7 @@ watch(ready, (isReady) => {
   else if (account.value.role === "platform_admin") {
     load();
     loadPricing();
+    loadTerms();
   }
 });
 
@@ -242,6 +263,90 @@ function addModelRule() {
 function removeModelRule(index: number) {
   pricing.value?.inference.splice(index, 1);
 }
+
+// --- Taxonomy workbench (ticket 06) ---
+
+async function loadTerms() {
+  if (!token.value) return;
+  try {
+    terms.value = await fetchTerms(backendURL);
+  } catch (e) {
+    taxError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+// termsFor lists one axis's vocabulary; keywords render as a compact hint.
+function termsFor(category: TaxonomyCategory): Term[] {
+  return terms.value.filter((t) => t.category === category);
+}
+
+function keywordsHint(t: Term): string {
+  return t.keywords.length ? t.keywords.join(", ") : "no keywords — label words are used";
+}
+
+async function submitCreateTerm() {
+  if (!token.value) return;
+  taxError.value = null;
+  taxNotice.value = null;
+  const keywords = newKeywords.value
+    .split(",")
+    .map((k) => k.trim().toLowerCase())
+    .filter(Boolean);
+  try {
+    const created = await createTerm(backendURL, token.value, {
+      category: newCategory.value,
+      label: newLabel.value.trim(),
+      keywords,
+    });
+    taxNotice.value = `Added “${created.label}” — future uploads classify against it.`;
+    newLabel.value = "";
+    newKeywords.value = "";
+    await loadTerms();
+  } catch (e) {
+    taxError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+function startEditTerm(t: Term) {
+  editingTerm.value = t;
+  editLabel.value = t.label;
+  editKeywords.value = t.keywords.join(", ");
+}
+
+async function submitEditTerm() {
+  if (!token.value || !editingTerm.value) return;
+  taxError.value = null;
+  taxNotice.value = null;
+  const keywords = editKeywords.value
+    .split(",")
+    .map((k) => k.trim().toLowerCase())
+    .filter(Boolean);
+  try {
+    await updateTerm(backendURL, token.value, editingTerm.value.id, {
+      label: editLabel.value.trim(),
+      keywords,
+    });
+    taxNotice.value = "Term updated — its category and value never change, so past assignments stay honest.";
+    editingTerm.value = null;
+    await loadTerms();
+  } catch (e) {
+    taxError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+async function submitDeleteTerm(t: Term) {
+  if (!token.value) return;
+  taxError.value = null;
+  taxNotice.value = null;
+  try {
+    await deleteTerm(backendURL, token.value, t.id);
+    taxNotice.value = `Removed “${t.label}”.`;
+    await loadTerms();
+  } catch (e) {
+    // A 409 (assets still carry the term) lands here with the backend's fix-it message.
+    taxError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
 </script>
 
 <template>
@@ -254,8 +359,9 @@ function removeModelRule(index: number) {
       <section class="card">
         <h2>Platform Admin</h2>
         <p class="hint">
-          Applications, contract versions, and the credits desk today;
-          taxonomy, modules, and platform stats arrive in later slices.
+          Applications, the contract versions, the credits desk, and the
+          taxonomy workbench; modules and platform stats arrive in later
+          slices.
         </p>
         <p v-if="error" class="error-text">{{ error }}</p>
         <p v-if="notice" class="ok-text">{{ notice }}</p>
@@ -398,6 +504,65 @@ function removeModelRule(index: number) {
       </section>
 
       <section class="card">
+        <h3>Taxonomy</h3>
+        <p class="hint">
+          The vocabulary every upload is auto-categorized against, across six
+          axes. Terms carry keywords the classifier matches; labels are what
+          buyers see. A term's category and value never change once created,
+          and a term assets still carry cannot be deleted.
+        </p>
+        <p v-if="taxError" class="error-text">{{ taxError }}</p>
+        <p v-if="taxNotice" class="ok-text">{{ taxNotice }}</p>
+
+        <form class="new-term" @submit.prevent="submitCreateTerm">
+          <label>
+            Category
+            <select v-model="newCategory">
+              <option v-for="c in TAXONOMY_CATEGORIES" :key="c" :value="c">{{ c.replaceAll("_", " ") }}</option>
+            </select>
+          </label>
+          <label>
+            Label
+            <input v-model="newLabel" type="text" required placeholder="e.g. County Leitrim" />
+          </label>
+          <label>
+            Keywords (comma-separated)
+            <input v-model="newKeywords" type="text" placeholder="e.g. leitrim, border" />
+          </label>
+          <button class="primary" type="submit">Add term</button>
+        </form>
+
+        <div v-for="c in TAXONOMY_CATEGORIES" :key="c" class="term-axis">
+          <h4>{{ c.replaceAll("_", " ") }}</h4>
+          <p v-if="termsFor(c).length === 0" class="hint">No terms yet.</p>
+          <ul v-else class="term-list">
+            <li v-for="t in termsFor(c)" :key="t.id">
+              <template v-if="editingTerm?.id === t.id">
+                <form class="edit-term" @submit.prevent="submitEditTerm">
+                  <input v-model="editLabel" type="text" required />
+                  <input v-model="editKeywords" type="text" placeholder="keywords, comma-separated" />
+                  <button class="primary" type="submit">Save</button>
+                  <button class="secondary" type="button" @click="editingTerm = null">Cancel</button>
+                </form>
+              </template>
+              <template v-else>
+                <div class="term-row">
+                  <div>
+                    <strong>{{ t.label }}</strong>
+                    <span class="hint"> · {{ t.value }} · keywords: {{ keywordsHint(t) }}</span>
+                  </div>
+                  <div class="row-actions">
+                    <button class="secondary" @click="startEditTerm(t)">Edit</button>
+                    <button class="danger" @click="submitDeleteTerm(t)">Delete</button>
+                  </div>
+                </div>
+              </template>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card">
         <h3>Publish a new Terms of Service version</h3>
         <p class="hint">
           Publishing makes the version current: every account that accepted an
@@ -469,5 +634,55 @@ function removeModelRule(index: number) {
 }
 .rate {
   width: 7rem;
+}
+.new-term {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+.new-term label {
+  margin-bottom: 0;
+  min-width: 10rem;
+}
+.new-term button {
+  margin-bottom: 0.15rem;
+}
+.term-axis h4 {
+  margin: 0.75rem 0 0.3rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.term-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.term-list li {
+  border-bottom: 1px solid var(--line);
+  padding: 0.4rem 0;
+}
+.term-list li:last-child {
+  border-bottom: 0;
+}
+.term-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.term-row .row-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.edit-term {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 </style>

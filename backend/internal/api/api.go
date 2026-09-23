@@ -28,25 +28,28 @@ type Pinger interface {
 // required by NewHandler; store and mail are mandatory for the membership
 // endpoints to register. Credits is optional: when nil, the credits
 // endpoints (ticket 03) do not register. Assets is optional: when nil, the
-// Data Asset endpoints (ticket 04) do not register.
+// Data Asset endpoints (ticket 04) do not register. Taxonomy is optional:
+// when nil, the taxonomy/catalog endpoints (ticket 06) do not register.
 type Deps struct {
-	Agent   Pinger
-	Version string
-	Store   membership.Store
-	Mail    mailsink.Sink
-	Credits *CreditsDeps
-	Assets  *AssetsDeps
+	Agent    Pinger
+	Version  string
+	Store    membership.Store
+	Mail     mailsink.Sink
+	Credits  *CreditsDeps
+	Assets   *AssetsDeps
+	Taxonomy *TaxonomyDeps
 }
 
 // Handler serves the backend API.
 type Handler struct {
-	agent   Pinger
-	version string
-	store   membership.Store
-	mail    mailsink.Sink
-	credits *creditsHandlers
-	assets  *assetsHandlers
-	mux     *http.ServeMux
+	agent    Pinger
+	version  string
+	store    membership.Store
+	mail     mailsink.Sink
+	credits  *creditsHandlers
+	assets   *assetsHandlers
+	taxonomy *taxonomyHandlers
+	mux      *http.ServeMux
 }
 
 // allowedOrigins lists the browser origins allowed to call this API across
@@ -90,6 +93,10 @@ func NewHandler(deps Deps) http.Handler {
 
 	if deps.Assets != nil {
 		h.registerAssetsRoutes(deps.Assets)
+	}
+
+	if deps.Taxonomy != nil {
+		h.registerTaxonomyRoutes(deps.Taxonomy)
 	}
 
 	return withCORS(h.mux)

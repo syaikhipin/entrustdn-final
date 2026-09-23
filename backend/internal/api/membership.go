@@ -409,6 +409,29 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) (membersh
 	return acct, true
 }
 
+// requireConsumer resolves the caller and refuses anyone but an approved
+// Data Consumer (the same contract-gates-the-surface rule requireAdmin and
+// requireOrg apply).
+func (h *Handler) requireConsumer(w http.ResponseWriter, r *http.Request) (membership.Account, bool) {
+	sess, acct, ok := h.sessionAuth(w, r)
+	if !ok {
+		return membership.Account{}, false
+	}
+	if sess.RequiresReacceptance {
+		apiError(w, http.StatusForbidden, "accept the current Terms of Service first (see /api/v1/tos/accept)")
+		return membership.Account{}, false
+	}
+	if acct.Role != membership.RoleDataConsumer {
+		apiError(w, http.StatusForbidden, "this endpoint is for Data Consumers")
+		return membership.Account{}, false
+	}
+	if acct.Status != membership.StatusActive {
+		apiError(w, http.StatusForbidden, "your account is not active")
+		return membership.Account{}, false
+	}
+	return acct, true
+}
+
 // handleListApplications lists Farmer Organization accounts awaiting a
 // Platform Admin decision (story 6).
 func (h *Handler) handleListApplications(w http.ResponseWriter, r *http.Request) {

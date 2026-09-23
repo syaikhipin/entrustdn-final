@@ -228,12 +228,9 @@ func assetJSON(a assets.Asset) map[string]any {
 	if pipeline == nil {
 		pipeline = []string{}
 	}
-	prov := map[string]any{
-		"source": a.Provenance.Source,
-		"notes":  a.Provenance.Notes,
-	}
-	if a.Provenance.CollectedAt != nil {
-		prov["collected_at"] = a.Provenance.CollectedAt.Format(time.RFC3339)
+	cats := make([]map[string]any, 0, len(a.Categories))
+	for _, c := range a.Categories {
+		cats = append(cats, assignmentJSON(c))
 	}
 	return map[string]any{
 		"id":          a.ID,
@@ -242,10 +239,24 @@ func assetJSON(a assets.Asset) map[string]any {
 		"size_bytes":  a.SizeBytes,
 		"format":      a.Format,
 		"pipeline":    pipeline,
-		"provenance":  prov,
-		"created_at":  a.CreatedAt.Format(time.RFC3339),
-		"updated_at":  a.UpdatedAt.Format(time.RFC3339),
+		"provenance":  provenanceJSON(a.Provenance),
+		"categories":  cats,
+		"created_at":  a.CreatedAt.Format(timeFormat),
+		"updated_at":  a.UpdatedAt.Format(timeFormat),
 	}
+}
+
+// provenanceJSON renders the origin metadata; collected_at appears only
+// when known.
+func provenanceJSON(p assets.Provenance) map[string]any {
+	prov := map[string]any{
+		"source": p.Source,
+		"notes":  p.Notes,
+	}
+	if p.CollectedAt != nil {
+		prov["collected_at"] = p.CollectedAt.Format(timeFormat)
+	}
+	return prov
 }
 
 // handleListAssets shows the org's shared-data dashboard contents.

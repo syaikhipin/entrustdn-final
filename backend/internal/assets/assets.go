@@ -2,7 +2,10 @@
 // a Farmer Organization uploads as inventory. Blobs live in object storage
 // behind the objectstore seam (ADR 0006: server-side only, clients never
 // touch the bucket); this package owns the metadata record and the ingest
-// pipeline (ADR 0005: anonymization runs as a stage at ingest).
+// pipeline (ADR 0005: anonymization runs as a stage at ingest). Since
+// ticket 06 the record also carries taxonomy assignments: auto-categorized
+// at ingest, correctable by the owning org, and the facets the consumer
+// catalog filters on.
 package assets
 
 import (
@@ -15,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/syaikhipin/entrustdn-final/backend/internal/taxonomy"
 )
 
 // MaxAssetBytes caps one upload. The API enforces it while streaming, so an
@@ -40,6 +45,10 @@ type Asset struct {
 	// Provenance is the verifiable origin metadata (CONTEXT.md): where the
 	// data came from and when it was collected.
 	Provenance Provenance
+	// Categories is the taxonomy stamp (ticket 06): classifier assignments
+	// at ingest, org corrections after. Each entry carries its own source
+	// and confidence — the categorization's provenance rides with it.
+	Categories []taxonomy.Assignment
 	ObjectKey  string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -122,8 +131,13 @@ type Store interface {
 	AssetByID(ctx context.Context, id string) (Asset, error)
 	// AssetsByOrg lists the org's records, newest first.
 	AssetsByOrg(ctx context.Context, orgID string) ([]Asset, error)
-	// UpdateAssetMeta rewrites name, description, and provenance, bumping
-	// UpdatedAt. The blob, size, and format never change after ingest.
+	// AllAssets lists every org's records, newest first — the catalog's
+	// scan (ticket 06). Consumer-scoped views filter from this; a pilot
+	// catalog fits in memory.
+	AllAssets(ctx context.Context) ([]Asset, error)
+	// UpdateAssetMeta rewrites name, description, provenance, and category
+	// assignments, bumping UpdatedAt. The blob, size, and format never
+	// change after ingest.
 	UpdateAssetMeta(ctx context.Context, a Asset) error
 	// DeleteAsset removes the record and returns what it was — the caller
 	// needs ObjectKey to clean the blob out of storage.
@@ -187,13 +201,30 @@ func (m *MemoryStore) AssetsByOrg(_ context.Context, orgID string) ([]Asset, err
 			out = append(out, a)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].CreatedAt.After(out[j].CreatedAt)
-		}
-		return out[i].ID < out[j].ID
-	})
+	sortAssets(out)
 	return out, nil
+}
+
+func (m *MemoryStore) AllAssets(_ context.Context) ([]Asset, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Asset, 0, len(m.assets))
+	for _, a := range m.assets {
+		out = append(out, a)
+	}
+	sortAssets(out)
+	return out, nil
+}
+
+// sortAssets orders records newest first, ID as the tiebreak — one order
+// for every listing path.
+func sortAssets(a []Asset) {
+	sort.Slice(a, func(i, j int) bool {
+		if !a[i].CreatedAt.Equal(a[j].CreatedAt) {
+			return a[i].CreatedAt.After(a[j].CreatedAt)
+		}
+		return a[i].ID < a[j].ID
+	})
 }
 
 func (m *MemoryStore) UpdateAssetMeta(_ context.Context, a Asset) error {
@@ -206,6 +237,7 @@ func (m *MemoryStore) UpdateAssetMeta(_ context.Context, a Asset) error {
 	cur.Name = a.Name
 	cur.Description = a.Description
 	cur.Provenance = a.Provenance
+	cur.Categories = a.Categories
 	cur.UpdatedAt = time.Now().UTC()
 	m.assets[a.ID] = cur
 	return nil
