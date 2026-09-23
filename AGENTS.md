@@ -10,7 +10,7 @@ Go backend + Python LangGraph agent sidecar + Nuxt.js frontend, monorepo
 
 ### Issue tracker
 
-Issues are tracked as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues are tracked on GitHub (`syaikhipin/entrustdn-final`); ticket NN = issue #NN. See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
