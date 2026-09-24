@@ -154,6 +154,7 @@ func TestAssignmentsByTermAndCategoriesRoundTrip(t *testing.T) {
 		a := assets.Asset{
 			ID: mustAssetID(t), OrgID: orgID, Name: name,
 			SizeBytes: 10, Format: "csv", Pipeline: []string{"anonymize"},
+			ObjectKey:  "assets/" + orgID + "/" + name,
 			Categories: stamp(),
 		}
 		if err := assetStore.CreateAsset(ctx, &a); err != nil {
@@ -191,16 +192,35 @@ func TestAssignmentsByTermAndCategoriesRoundTrip(t *testing.T) {
 		t.Errorf("AssignedAt = %v, want the stored timestamp", c.AssignedAt)
 	}
 
-	// Clearing categories via UpdateAssetMeta empties the counter.
+	// Clearing categories via UpdateAssetMeta drops the counter with it:
+	// two assets are stamped, so the count falls 2 → 1 → 0 as each is
+	// cleared.
 	got.Categories = nil
 	if err := assetStore.UpdateAssetMeta(ctx, got); err != nil {
 		t.Fatalf("UpdateAssetMeta: %v", err)
 	}
 	usage, err = assetStore.AssignmentsByTerm(ctx)
 	if err != nil {
-		t.Fatalf("AssignmentsByTerm after clear: %v", err)
+		t.Fatalf("AssignmentsByTerm after first clear: %v", err)
+	}
+	if usage[term.ID] != 1 {
+		t.Errorf("usage[%s] after first clear = %d, want 1", term.ID, usage[term.ID])
+	}
+	as, _ := assetStore.AssetsByOrg(ctx, orgID)
+	for _, a := range as {
+		if a.ID == got.ID {
+			continue
+		}
+		a.Categories = nil
+		if err := assetStore.UpdateAssetMeta(ctx, a); err != nil {
+			t.Fatalf("UpdateAssetMeta %s: %v", a.ID, err)
+		}
+	}
+	usage, err = assetStore.AssignmentsByTerm(ctx)
+	if err != nil {
+		t.Fatalf("AssignmentsByTerm after second clear: %v", err)
 	}
 	if usage[term.ID] != 0 {
-		t.Errorf("usage[%s] after clear = %d, want 0", term.ID, usage[term.ID])
+		t.Errorf("usage[%s] after second clear = %d, want 0", term.ID, usage[term.ID])
 	}
 }

@@ -37,7 +37,9 @@ func scanTerm(row pgx.Row) (taxonomy.Term, error) {
 
 // CreateTerm inserts one term. The caller's ID wins when set (the seed
 // path mints through the domain package); uniqueness violations surface as
-// taxonomy.ErrExists.
+// taxonomy.ErrExists. CreatedAt is written back through the pointer, and a
+// nil Keywords slice rides as an empty array — NULL would trip the column's
+// NOT NULL before a duplicate could trip its UNIQUE.
 func (s *TaxonomyStore) CreateTerm(ctx context.Context, t *taxonomy.Term) error {
 	if t.ID == "" {
 		id, err := taxonomy.NewID()
@@ -46,10 +48,15 @@ func (s *TaxonomyStore) CreateTerm(ctx context.Context, t *taxonomy.Term) error 
 		}
 		t.ID = id
 	}
-	_, err := s.pool.Exec(ctx, `
+	keywords := t.Keywords
+	if keywords == nil {
+		keywords = []string{}
+	}
+	err := s.pool.QueryRow(ctx, `
 		INSERT INTO taxonomy_terms (id, category, value, label, keywords)
-		VALUES ($1, $2, $3, $4, $5)`,
-		t.ID, string(t.Category), t.Value, t.Label, t.Keywords)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING created_at`,
+		t.ID, string(t.Category), t.Value, t.Label, keywords).Scan(&t.CreatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
