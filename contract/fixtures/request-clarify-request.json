@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "type": "request.clarify.request",
+  "sent_at": "2026-09-23T10:00:00Z",
+  "payload": {
+    "request_id": "req-clarify-01",
+    "description": "Spring barley yields across Leinster for the 2026 season",
+    "format": "csv",
+    "quality_bar": "Farm-level records with provenance",
+    "budget_micros": 10000000,
+    "spent_micros": 0,
+    "message": "I need spring barley yield data for Leinster",
+    "history": [
+      { "role": "consumer", "body": "Hello, I am looking for yield data" },
+      { "role": "agent", "body": "Which counties and season should the data cover?" }
+    ],
+    "catalog": [
+      {
+        "id": "asset-01",
+        "name": "Leinster barley yields 2025",
+        "description": "Farm-level spring barley yields, county tagged",
+        "categories": [
+          { "category": "crop", "value": "spring-barley", "label": "Spring barley" }
+        ],
+        "cached_price_micros": 5000000
+      }
+    ]
+  }
+}

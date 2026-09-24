@@ -54,9 +54,11 @@ agent/
     contract.py       Pydantic contract, pinned to /contract fixtures
     app.py            FastAPI /message + /health
     graph.py          LangGraph runtime (tracer-bullet ping node)
-    channels.py       Channel adapter interface + FakeChannel (Seam 3)
+    channels.py       Channel adapter interface + Fake/WebChat channels (Seam 3)
     mcp_harness.py    in-process MCP fake memory provider (Seam 4)
     converse.py       agent-side conversation helpers
+    clarify.py        clarification loop + web-chat turn (ticket 07)
+    gateway.py        model gateway: fake + OpenAI-compatible
 web/
   app/app.vue         status page
   app/status.ts       backend status parsing

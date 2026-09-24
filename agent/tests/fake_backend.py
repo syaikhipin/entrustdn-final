@@ -21,8 +21,14 @@ class FakeBackend:
     """Drives the real sidecar the way the backend will: typed contract
     messages built from the golden fixtures."""
 
-    def __init__(self, agent_version: str = "fake-tested-1") -> None:
-        self.client = TestClient(create_app(agent_version))
+    def __init__(
+        self,
+        agent_version: str = "fake-tested-1",
+        gateway_kwargs: dict | None = None,
+    ) -> None:
+        self.client = TestClient(
+            create_app(agent_version, gateway_kwargs=gateway_kwargs)
+        )
 
     def send(self, message_type: str, payload: dict[str, Any]) -> Any:
         doc = self.envelope(message_type, payload)
@@ -39,6 +45,8 @@ class FakeBackend:
         base = {
             "ping.request": "ping-request.json",
             "ping.response": "ping-response.json",
+            "request.clarify.request": "request-clarify-request.json",
+            "request.clarify.response": "request-clarify-response.json",
         }[message_type]
         doc = __import__("json").loads((FIXTURES / base).read_text())
         doc["payload"] = payload

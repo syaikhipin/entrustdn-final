@@ -18,9 +18,11 @@ import (
 // (an httptest server speaking the /contract fixtures' shape). This is the
 // backend-side half of Seam 2: the client must send a valid ping.request
 // envelope and accept a well-formed ping.response, and it must never
-// misreport a broken agent as healthy.
+// misreport a broken agent as healthy. Ticket 07 adds the clarify
+// round trip over the same endpoint.
 
-// newFakeAgent returns a contract-fake agent answering ping requests.
+// newFakeAgent returns a contract-fake agent answering ping and clarify
+// requests.
 func newFakeAgent(t *testing.T, nonceSeen *string, respondWith func(w http.ResponseWriter, nonce string)) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -150,5 +152,122 @@ func TestPingRejectsMismatchedNonce(t *testing.T) {
 	}
 	if err != nil && !strings.Contains(err.Error(), "nonce") {
 		t.Errorf("Ping() error should mention nonce mismatch, got: %v", err)
+	}
+}
+
+// clarifyAgent answers clarify envelopes, recording what it received.
+func clarifyAgent(t *testing.T, seen *contract.ClarifyRequest, respond func(w http.ResponseWriter, req contract.ClarifyRequest)) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var env contract.Envelope
+		if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
+			http.Error(w, "bad envelope", http.StatusBadRequest)
+			return
+		}
+		if env.Type != contract.TypeClarifyRequest {
+			http.Error(w, "want clarify request", http.StatusBadRequest)
+			return
+		}
+		var req contract.ClarifyRequest
+		if err := env.PayloadInto(&req); err != nil {
+			http.Error(w, "bad payload", http.StatusBadRequest)
+			return
+		}
+		*seen = req
+		respond(w, req)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func writeClarifyResponse(w http.ResponseWriter, resp contract.ClarifyResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(contract.Envelope{
+		Version: contract.Version,
+		Type:    contract.TypeClarifyResponse,
+		SentAt:  time.Now().UTC(),
+		Payload: mustJSON(resp),
+	})
+}
+
+func TestClarifyRoundTripsThroughFakeAgent(t *testing.T) {
+	var seen contract.ClarifyRequest
+	srv := clarifyAgent(t, &seen, func(w http.ResponseWriter, req contract.ClarifyRequest) {
+		writeClarifyResponse(w, contract.ClarifyResponse{
+			RequestID: req.RequestID,
+			Reply:     "Which counties?",
+			Clarified: false,
+			Matches:   []contract.CatalogMatch{{AssetID: "a-1", Name: "Yields 2025", Reason: "catalog"}},
+			Usage:     contract.MeteredUsage{Model: "m", InputTokens: 120, CachedInputTokens: 40, OutputTokens: 30},
+		})
+	})
+
+	req := contract.ClarifyRequest{
+		RequestID:    "req-7",
+		Description:  "spring barley yields",
+		Format:       "csv",
+		QualityBar:   "farm-level",
+		BudgetMicros: 1_000,
+		SpentMicros:  0,
+		Message:      "I need yield data",
+		History:      []contract.HistoryTurn{{Role: "consumer", Body: "hello"}},
+		Catalog:      []contract.CatalogAsset{{ID: "a-1", Name: "Yields 2025", CachedPriceMicros: 5_000_000}},
+	}
+	resp, err := agentclient.New(srv.URL).Clarify(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Clarify() error = %v", err)
+	}
+	if resp.RequestID != "req-7" || resp.Reply != "Which counties?" {
+		t.Errorf("response = %+v, want the fake's reply", resp)
+	}
+	if seen.RequestID != "req-7" || seen.Message != "I need yield data" {
+		t.Errorf("agent saw %+v, want the request we sent", seen)
+	}
+}
+
+func TestClarifyRejectsWrongRequestIDInReply(t *testing.T) {
+	var seen contract.ClarifyRequest
+	srv := clarifyAgent(t, &seen, func(w http.ResponseWriter, req contract.ClarifyRequest) {
+		writeClarifyResponse(w, contract.ClarifyResponse{
+			RequestID: "some-other-request",
+			Reply:     "hi",
+			Usage:     contract.MeteredUsage{Model: "m", InputTokens: 1, OutputTokens: 1},
+		})
+	})
+
+	if _, err := agentclient.New(srv.URL).Clarify(context.Background(), contract.ClarifyRequest{
+		RequestID: "req-7", Description: "d", Format: "csv", Message: "hi",
+	}); err == nil {
+		t.Fatal("Clarify() accepting a reply for another request = nil error, want error")
+	}
+}
+
+func TestClarifyRejectsUnusableReply(t *testing.T) {
+	tests := []struct {
+		name string
+		resp contract.ClarifyResponse
+	}{
+		{
+			name: "empty reply text",
+			resp: contract.ClarifyResponse{RequestID: "req-7", Usage: contract.MeteredUsage{Model: "m", InputTokens: 1, OutputTokens: 1}},
+		},
+		{
+			name: "cached tokens exceed input",
+			resp: contract.ClarifyResponse{RequestID: "req-7", Reply: "hi",
+				Usage: contract.MeteredUsage{Model: "m", InputTokens: 1, CachedInputTokens: 5, OutputTokens: 1}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var seen contract.ClarifyRequest
+			srv := clarifyAgent(t, &seen, func(w http.ResponseWriter, req contract.ClarifyRequest) {
+				writeClarifyResponse(w, tt.resp)
+			})
+			if _, err := agentclient.New(srv.URL).Clarify(context.Background(), contract.ClarifyRequest{
+				RequestID: "req-7", Description: "d", Format: "csv", Message: "hi",
+			}); err == nil {
+				t.Fatal("Clarify() accepting an unusable reply = nil error, want error")
+			}
+		})
 	}
 }

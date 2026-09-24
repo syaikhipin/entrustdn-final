@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "type": "request.clarify.response",
+  "sent_at": "2026-09-23T10:00:01Z",
+  "payload": {
+    "request_id": "req-clarify-01",
+    "reply": "I found an existing asset that may already answer this. Which counties exactly do you need?",
+    "clarified": false,
+    "matches": [
+      {
+        "asset_id": "asset-01",
+        "name": "Leinster barley yields 2025",
+        "reason": "catalog asset tagged spring barley in Leinster"
+      }
+    ],
+    "usage": {
+      "model": "thresh-fake-model",
+      "input_tokens": 120,
+      "cached_input_tokens": 40,
+      "output_tokens": 30
+    }
+  }
+}

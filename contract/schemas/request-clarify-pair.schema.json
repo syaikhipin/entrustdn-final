@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thresh.dev/contract/request-clarify-pair.schema.json",
+  "title": "Thresh request.clarify request/response payloads",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/request_clarify_request" },
+    { "$ref": "#/$defs/request_clarify_response" }
+  ],
+  "$defs": {
+    "catalog_asset": {
+      "type": "object",
+      "description": "One catalog Asset handed to the agent so it can check the catalog before fielding.",
+      "required": ["id", "name", "description", "categories", "cached_price_micros"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "categories": {
+          "type": "array",
+          "description": "The asset's taxonomy assignments (category, value, label).",
+          "items": {
+            "type": "object",
+            "required": ["category", "value", "label"],
+            "additionalProperties": false,
+            "properties": {
+              "category": { "type": "string", "minLength": 1 },
+              "value": { "type": "string", "minLength": 1 },
+              "label": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "cached_price_micros": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "history_turn": {
+      "type": "object",
+      "description": "One prior turn of the clarification conversation.",
+      "required": ["role", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "role": { "type": "string", "enum": ["consumer", "agent"] },
+        "body": { "type": "string", "minLength": 1 }
+      }
+    },
+    "request_clarify_request": {
+      "type": "object",
+      "description": "Sent backend→agent for one clarification turn: the Request so far, the consumer's new message, the conversation history, and the catalog snapshot to check first.",
+      "required": [
+        "request_id", "description", "format", "quality_bar", "budget_micros",
+        "spent_micros", "message", "history", "catalog"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "format": { "type": "string", "minLength": 1 },
+        "quality_bar": { "type": "string" },
+        "budget_micros": { "type": "integer", "minimum": 0 },
+        "spent_micros": { "type": "integer", "minimum": 0 },
+        "message": { "type": "string", "minLength": 1 },
+        "history": { "type": "array", "items": { "$ref": "#/$defs/history_turn" } },
+        "catalog": { "type": "array", "items": { "$ref": "#/$defs/catalog_asset" } }
+      }
+    },
+    "catalog_match": {
+      "type": "object",
+      "description": "One existing Asset the agent reports as already answering the need.",
+      "required": ["asset_id", "name", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "metered_usage": {
+      "type": "object",
+      "description": "Token usage of the model call, as the gateway metered it. Cached input rides inside input per the OpenAI convention and bills at the cheaper cached rate.",
+      "required": ["model", "input_tokens", "cached_input_tokens", "output_tokens"],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "cached_input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "request_clarify_response": {
+      "type": "object",
+      "description": "Agent's answer for one clarification turn: the reply text, whether the Request is fully clarified, any existing-Asset matches, and the metered usage to post to the Ledger.",
+      "required": ["request_id", "reply", "clarified", "matches", "usage"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": { "type": "string", "minLength": 1 },
+        "reply": { "type": "string", "minLength": 1 },
+        "clarified": { "type": "boolean" },
+        "matches": { "type": "array", "items": { "$ref": "#/$defs/catalog_match" } },
+        "usage": { "$ref": "#/$defs/metered_usage" }
+      }
+    }
+  }
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/syaikhipin/entrustdn-final/backend/internal/api"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/assets"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/config"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/objectstore"
@@ -76,6 +77,8 @@ func run() error {
 	// endpoint with a missing bucket is auto-created (dev convenience).
 	var assetsDeps *api.AssetsDeps
 	var taxonomyDeps *api.TaxonomyDeps
+	var requestsDeps *api.RequestsDeps
+	var assetSvc *assets.Service
 	if cfg.S3.Enabled() {
 		blobs, err := objectstore.NewS3(ctx, objectstore.S3Config{
 			EndpointURL: cfg.S3.Endpoint,
@@ -109,13 +112,50 @@ func run() error {
 			Rules:   postgres.CreditRulesLoader(pool),
 		}
 
+		assetSvc = assets.NewService(postgres.NewAssetsStore(pool), blobs, assets.NewPipeline(anonymize.NewStage(pseudonyms))).
+			WithCategorizer(taxSvc)
 		assetsDeps = &api.AssetsDeps{
-			Service: assets.NewService(postgres.NewAssetsStore(pool), blobs, assets.NewPipeline(anonymize.NewStage(pseudonyms))).
-				WithCategorizer(taxSvc),
+			Service:    assetSvc,
 			Pseudonyms: &api.PseudonymDeps{Map: pseudonyms},
 		}
 	} else {
 		log.Printf("thresh-backend %s: S3_ENDPOINT_URL not set — asset endpoints disabled", version)
+	}
+
+	// Requests & clarification (ticket 07): every chat turn hands the agent
+	// a live catalog snapshot — the assets service's catalog at the current
+	// price book's cached-download price. Without object storage there is
+	// no catalog to check, so the endpoints don't register.
+	if assetSvc != nil {
+		rulesLoader := postgres.CreditRulesLoader(pool)
+		requestsDeps = &api.RequestsDeps{
+			Store: postgres.NewRequestsStore(pool),
+			Catalog: func(ctx context.Context) ([]contract.CatalogAsset, error) {
+				rules, err := rulesLoader(ctx)
+				if err != nil {
+					return nil, err
+				}
+				entries, _, err := assetSvc.Catalog(ctx, rules.Data.CachedAssetMicrosPerUnit)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]contract.CatalogAsset, 0, len(entries))
+				for _, e := range entries {
+					stamps := make([]contract.CategoryStamp, 0, len(e.Categories))
+					for _, a := range e.Categories {
+						stamps = append(stamps, contract.CategoryStamp{
+							Category: string(a.Category), Value: a.Value, Label: a.Label,
+						})
+					}
+					out = append(out, contract.CatalogAsset{
+						ID: e.ID, Name: e.Name, Description: e.Description,
+						Categories:        stamps,
+						CachedPriceMicros: e.CachedPriceMicros,
+					})
+				}
+				return out, nil
+			},
+		}
 	}
 
 	handler := api.NewHandler(api.Deps{
@@ -132,6 +172,7 @@ func run() error {
 		},
 		Assets:   assetsDeps,
 		Taxonomy: taxonomyDeps,
+		Requests: requestsDeps,
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,

@@ -5,9 +5,7 @@
 package agentclient
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -35,35 +33,9 @@ func (c *Client) Ping(ctx context.Context, nonce string) (contract.PingResponse,
 	if err != nil {
 		return contract.PingResponse{}, fmt.Errorf("failed to build ping request: %w", err)
 	}
-	body, err := json.Marshal(env)
+	replyEnv, err := c.roundTrip(ctx, env, contract.TypePingResponse, "ping")
 	if err != nil {
-		return contract.PingResponse{}, fmt.Errorf("failed to encode ping request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/message", bytes.NewReader(body))
-	if err != nil {
-		return contract.PingResponse{}, fmt.Errorf("failed to build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return contract.PingResponse{}, fmt.Errorf("agent unreachable: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return contract.PingResponse{}, fmt.Errorf("agent returned status %d", resp.StatusCode)
-	}
-
-	var replyEnv contract.Envelope
-	if err := json.NewDecoder(resp.Body).Decode(&replyEnv); err != nil {
-		return contract.PingResponse{}, fmt.Errorf("agent response is not a contract envelope: %w", err)
-	}
-	if err := replyEnv.Validate(); err != nil {
-		return contract.PingResponse{}, fmt.Errorf("agent response failed validation: %w", err)
-	}
-	if replyEnv.Type != contract.TypePingResponse {
-		return contract.PingResponse{}, fmt.Errorf("agent responded with %q, want %q", replyEnv.Type, contract.TypePingResponse)
+		return contract.PingResponse{}, err
 	}
 
 	var reply contract.PingResponse
@@ -75,6 +47,33 @@ func (c *Client) Ping(ctx context.Context, nonce string) (contract.PingResponse,
 	}
 	if reply.Nonce != nonce {
 		return reply, fmt.Errorf("agent echoed nonce %q, want %q: nonce mismatch", reply.Nonce, nonce)
+	}
+	return reply, nil
+}
+
+// Clarify sends one request.clarify.request and validates the
+// request.clarify.response — the ticket 07 round trip. The reply must name
+// the request it answers and carry usable metered usage; anything else is
+// refused before the caller can charge on it.
+func (c *Client) Clarify(ctx context.Context, req contract.ClarifyRequest) (contract.ClarifyResponse, error) {
+	env, err := contract.NewClarifyRequest(req, time.Now().UTC())
+	if err != nil {
+		return contract.ClarifyResponse{}, fmt.Errorf("failed to build clarify request: %w", err)
+	}
+	replyEnv, err := c.roundTrip(ctx, env, contract.TypeClarifyResponse, "clarify")
+	if err != nil {
+		return contract.ClarifyResponse{}, err
+	}
+
+	var reply contract.ClarifyResponse
+	if err := replyEnv.PayloadInto(&reply); err != nil {
+		return contract.ClarifyResponse{}, fmt.Errorf("agent response payload invalid: %w", err)
+	}
+	if err := reply.Validate(); err != nil {
+		return contract.ClarifyResponse{}, fmt.Errorf("agent response invalid: %w", err)
+	}
+	if reply.RequestID != req.RequestID {
+		return reply, fmt.Errorf("agent answered request %q, want %q", reply.RequestID, req.RequestID)
 	}
 	return reply, nil
 }

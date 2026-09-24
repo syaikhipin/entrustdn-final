@@ -70,8 +70,12 @@ The AI actor that clarifies Requests, converses with Farmer Members over Channel
 _Avoid_: bot, assistant, AI
 
 **Channel**:
-A messaging medium between the agent and a Farmer Member: WhatsApp, Telegram, email, web, or voice.
-_Avoid_: integration, gateway
+A messaging medium between the agent and a Farmer Member: WhatsApp, Telegram, email, web, or voice. The web Channel (ticket 07) is the platform's own chat surface between the Agent and a Data Consumer.
+_Avoid_: integration
+
+**Model Gateway**:
+The OpenAI-compatible inference endpoint the Agent's clarification loop calls, configured by environment. Distinct from a Channel (a medium to people) and from the Payment Gateway (platform configuration).
+_Avoid_: LLM provider, API
 
 **Module**:
 A versioned, uploadable bundle — manifest plus markdown and/or configuration — of exactly one kind: Agent Skill, Process Template, or Connector. System-wide or private.

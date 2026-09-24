@@ -11,7 +11,14 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
-from thresh_agent.contract import CONTRACT_VERSION, Envelope, PingRequest, PingResponse
+from thresh_agent.contract import (
+    CONTRACT_VERSION,
+    ClarifyRequest,
+    ClarifyResponse,
+    Envelope,
+    PingRequest,
+    PingResponse,
+)
 
 FIXTURES = Path(__file__).resolve().parents[2] / "contract" / "fixtures"
 SCHEMAS = Path(__file__).resolve().parents[2] / "contract" / "schemas"
@@ -62,6 +69,68 @@ class TestPingPair:
 
 def test_contract_version_is_one() -> None:
     assert CONTRACT_VERSION == 1
+
+
+class TestClarifyPair:
+    """Ticket 07's contract pair: request.clarify.request/response, pinned
+    to the golden fixtures exactly like the ping pair."""
+
+    def test_request_round_trip(self) -> None:
+        doc = load_fixture("request-clarify-request.json")
+        env = Envelope.model_validate(doc)
+        assert env.type == "request.clarify.request"
+        req = ClarifyRequest.model_validate(env.payload)
+        assert req.request_id == "req-clarify-01"
+        assert req.format == "csv"
+        assert req.budget_micros == 10_000_000
+        assert req.spent_micros == 0
+        assert len(req.history) == 2
+        assert req.history[0].role == "consumer"
+        assert req.catalog[0].id == "asset-01"
+        assert req.catalog[0].cached_price_micros == 5_000_000
+
+    def test_response_round_trip(self) -> None:
+        doc = load_fixture("request-clarify-response.json")
+        env = Envelope.model_validate(doc)
+        assert env.type == "request.clarify.response"
+        resp = ClarifyResponse.model_validate(env.payload)
+        assert resp.request_id == "req-clarify-01"
+        assert resp.clarified is False
+        assert resp.matches[0].asset_id == "asset-01"
+        assert resp.usage.input_tokens == 120
+        assert resp.usage.cached_input_tokens == 40
+        assert resp.usage.output_tokens == 30
+
+    def test_request_rejects_unknown_fields(self) -> None:
+        doc = load_fixture("request-clarify-request.json")
+        doc["payload"]["extra"] = 1
+        with pytest.raises(Exception):
+            ClarifyRequest.model_validate(doc["payload"])
+
+    def test_response_rejects_unknown_fields(self) -> None:
+        doc = load_fixture("request-clarify-response.json")
+        doc["payload"]["extra"] = 1
+        with pytest.raises(Exception):
+            ClarifyResponse.model_validate(doc["payload"])
+
+    def test_response_rejects_cached_exceeding_input(self) -> None:
+        doc = load_fixture("request-clarify-response.json")
+        doc["payload"]["usage"]["cached_input_tokens"] = 999
+        with pytest.raises(Exception):
+            ClarifyResponse.model_validate(doc["payload"])
+
+    def test_schemas_validate_clarify_fixtures(self) -> None:
+        validator = Draft202012Validator(
+            json.loads((SCHEMAS / "request-clarify-pair.schema.json").read_text())
+        )
+        env_validator = self._envelope_validator()
+        for name in ("request-clarify-request.json", "request-clarify-response.json"):
+            doc = load_fixture(name)
+            env_validator.validate(doc)
+            validator.validate(doc["payload"])
+
+    def _envelope_validator(self) -> Draft202012Validator:
+        return Draft202012Validator(json.loads((SCHEMAS / "envelope.schema.json").read_text()))
 
 
 class TestSchemaEnforcement:

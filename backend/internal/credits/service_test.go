@@ -253,3 +253,35 @@ func TestAdjustmentAndGrantPostThroughTheLedger(t *testing.T) {
 		t.Errorf("balance after +2.5/−2.5 adjustments = %d, want the granted 100 credits", bal)
 	}
 }
+
+func TestChargeInferenceCappedAtSpentPlusAmount(t *testing.T) {
+	// The look-then-charge pair the request chat path used (PriceInference
+	// then ChargeInference) loaded the rules twice, so a rule change between
+	// the two could charge more than the guard approved. The capped charge
+	// prices and posts in one step under one rule load, refusing any charge
+	// that would cross the cap.
+	svc, store, acct := seededConsumer(t)
+
+	mov, err := svc.ChargeInferenceCapped(t.Context(), credits.InferenceUsage{
+		InputTokens: 1_000, OutputTokens: 1_000,
+	}, credits.Charge{Scope: acct, Model: "test-model", Memo: "capped"}, 12_500)
+	if err != nil {
+		t.Fatalf("ChargeInferenceCapped at the cap: %v", err)
+	}
+	if mov.Entries[0].AmountMicros != -12_500 {
+		t.Errorf("charge = %d, want the priced 12_500 (at the cap, unchanged)", mov.Entries[0].AmountMicros)
+	}
+
+	// The same usage refused when the cap is one micro tighter: nothing
+	// posts, the balance is untouched.
+	_, err = svc.ChargeInferenceCapped(t.Context(), credits.InferenceUsage{
+		InputTokens: 1_000, OutputTokens: 1_000,
+	}, credits.Charge{Scope: acct, Model: "test-model"}, 12_499)
+	if !errors.Is(err, credits.ErrCapExceeded) {
+		t.Fatalf("over-cap charge error = %v, want ErrCapExceeded", err)
+	}
+	bal, _ := store.Balance(t.Context(), acct)
+	if bal != 100*credits.MicrosPerCredit-12_500 {
+		t.Errorf("balance = %d, want the first charge only", bal)
+	}
+}

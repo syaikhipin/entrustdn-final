@@ -62,6 +62,11 @@ var ErrNotFound = errors.New("credits: not found")
 // scope below zero. System scopes may go negative (treasury issues credits).
 var ErrInsufficientFunds = errors.New("credits: insufficient funds")
 
+// ErrCapExceeded is returned when a capped charge's price would cross the
+// caller-approved cap (ticket 07: the request budget guard). Priced and
+// posted in one step, so the cap and the posted amount can never disagree.
+var ErrCapExceeded = errors.New("credits: charge would exceed the approved cap")
+
 // Entry is one leg of a movement: a scope and a signed amount. Positive
 // credits the scope, negative debits it.
 type Entry struct {

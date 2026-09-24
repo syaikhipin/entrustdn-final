@@ -24,12 +24,22 @@ type Pinger interface {
 	Ping(ctx context.Context, nonce string) (contract.PingResponse, error)
 }
 
+// AgentClient is Pinger plus the clarification turns the request endpoints
+// (ticket 07) drive over the contract. *agentclient.Client satisfies it.
+type AgentClient interface {
+	Pinger
+	Clarify(ctx context.Context, req contract.ClarifyRequest) (contract.ClarifyResponse, error)
+}
+
 // Deps carries the collaborators the API needs. Non-nil dependencies are
 // required by NewHandler; store and mail are mandatory for the membership
 // endpoints to register. Credits is optional: when nil, the credits
 // endpoints (ticket 03) do not register. Assets is optional: when nil, the
 // Data Asset endpoints (ticket 04) do not register. Taxonomy is optional:
 // when nil, the taxonomy/catalog endpoints (ticket 06) do not register.
+// Requests is optional: when nil, the request endpoints (ticket 07) do not
+// register — and it needs Agent to be a full AgentClient, since every chat
+// turn round-trips the Go↔Agent contract.
 type Deps struct {
 	Agent    Pinger
 	Version  string
@@ -38,6 +48,7 @@ type Deps struct {
 	Credits  *CreditsDeps
 	Assets   *AssetsDeps
 	Taxonomy *TaxonomyDeps
+	Requests *RequestsDeps
 }
 
 // Handler serves the backend API.
@@ -49,6 +60,7 @@ type Handler struct {
 	credits  *creditsHandlers
 	assets   *assetsHandlers
 	taxonomy *taxonomyHandlers
+	requests *requestsHandlers
 	mux      *http.ServeMux
 }
 
@@ -97,6 +109,10 @@ func NewHandler(deps Deps) http.Handler {
 
 	if deps.Taxonomy != nil {
 		h.registerTaxonomyRoutes(deps.Taxonomy)
+	}
+
+	if deps.Requests != nil {
+		h.registerRequestsRoutes(deps.Requests)
 	}
 
 	return withCORS(h.mux)
