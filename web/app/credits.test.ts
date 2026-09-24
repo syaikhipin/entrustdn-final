@@ -44,13 +44,13 @@ describe("parseCreditsView", () => {
     const view = parseCreditsView(creditsDoc);
     expect(view.balanceMicros).toBe(49_987_500);
     expect(view.movements).toHaveLength(2);
-    expect(view.movements[0].kind).toBe("inference_charge");
-    expect(view.movements[1].kind).toBe("grant");
+    expect(view.movements[0]!.kind).toBe("inference_charge");
+    expect(view.movements[1]!.kind).toBe("grant");
   });
 
   it("reads entries with their scopes and memos", () => {
     const view = parseCreditsView(creditsDoc);
-    expect(view.movements[0].entries).toEqual([
+    expect(view.movements[0]!.entries).toEqual([
       { scope: "acct:1111", amountMicros: -12_500, memo: "test-model" },
       { scope: "sys:platform", amountMicros: 12_500, memo: "test-model" },
     ]);
@@ -76,7 +76,7 @@ describe("parseCreditsView", () => {
       ],
     };
     const view = parseCreditsView(doc);
-    expect(view.movements[0].inference).toEqual({
+    expect(view.movements[0]!.inference).toEqual({
       model: "test-model",
       inputTokens: 1_000,
       cachedInputTokens: 500,
@@ -85,7 +85,7 @@ describe("parseCreditsView", () => {
       cachedInputMicrosPer1K: 1_250,
       outputMicrosPer1K: 10_000,
     });
-    expect(view.movements[1].inference).toBeUndefined();
+    expect(view.movements[1]!.inference).toBeUndefined();
   });
 
   it("refuses an inference detail with a non-integer count", () => {

@@ -73,7 +73,8 @@ describe("parseFacets", () => {
       { termId: "t-dairy", value: "dairy", label: "Dairy", count: 2 },
       { termId: "t-beef", value: "beef", label: "Beef", count: 1 },
     ]);
-    expect(got.crop![0].count).toBe(2);
+    expect(got.crop).toHaveLength(2);
+    expect(got.crop![0]!.count).toBe(2);
   });
 
   it("refuses bad counts and unknown axes", () => {

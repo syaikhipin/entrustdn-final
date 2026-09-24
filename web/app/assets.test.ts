@@ -61,7 +61,7 @@ describe("parseAssetList", () => {
   it("reads the dashboard document", () => {
     const list = parseAssetList({ assets: [assetDoc] });
     expect(list).toHaveLength(1);
-    expect(list[0].id).toBe("a1b2c3");
+    expect(list[0]!.id).toBe("a1b2c3");
   });
 
   it("refuses a document without an assets array", () => {
