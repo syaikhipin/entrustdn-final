@@ -39,7 +39,8 @@ type AgentClient interface {
 // when nil, the taxonomy/catalog endpoints (ticket 06) do not register.
 // Requests is optional: when nil, the request endpoints (ticket 07) do not
 // register — and it needs Agent to be a full AgentClient, since every chat
-// turn round-trips the Go↔Agent contract.
+// turn round-trips the Go↔Agent contract. Modules is optional: when nil,
+// the module registry endpoints (ticket 08) do not register.
 type Deps struct {
 	Agent    Pinger
 	Version  string
@@ -49,6 +50,7 @@ type Deps struct {
 	Assets   *AssetsDeps
 	Taxonomy *TaxonomyDeps
 	Requests *RequestsDeps
+	Modules  *ModulesDeps
 }
 
 // Handler serves the backend API.
@@ -61,6 +63,7 @@ type Handler struct {
 	assets   *assetsHandlers
 	taxonomy *taxonomyHandlers
 	requests *requestsHandlers
+	modules  *modulesHandlers
 	mux      *http.ServeMux
 }
 
@@ -113,6 +116,10 @@ func NewHandler(deps Deps) http.Handler {
 
 	if deps.Requests != nil {
 		h.registerRequestsRoutes(deps.Requests)
+	}
+
+	if deps.Modules != nil {
+		h.registerModulesRoutes(deps.Modules)
 	}
 
 	return withCORS(h.mux)

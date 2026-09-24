@@ -28,6 +28,7 @@ async function logout() {
       <nav>
         <template v-if="account">
           <NuxtLink to="/requests">Requests</NuxtLink>
+          <NuxtLink to="/modules">Modules</NuxtLink>
           <span class="who">{{ account.displayName }}</span>
           <button class="link" @click="logout">Log out</button>
         </template>

@@ -33,10 +33,12 @@ make test-agent    # pytest
 make test-web      # vitest
 ```
 
-Testing happens at four agreed seams (spec, Testing Decisions):
-backend public HTTP API, Go↔Agent contract (fake agent / fake backend),
-Channel adapter interface (fake channels), and the MCP client boundary
-(in-process fake MCP servers). No test touches live external APIs.
+Testing happens at agreed seams (spec, Testing Decisions): the four
+contract seams — backend public HTTP API, Go↔Agent contract (fake agent /
+fake backend), Channel adapter interface (fake channels), and the MCP client
+boundary (in-process fake MCP servers) — plus unit tests at the service and
+store seams of the domain packages, per repo precedent. No test touches
+live external APIs.
 
 ## Layout
 
@@ -47,7 +49,14 @@ backend/
   internal/agentclient/  backend→agent contract client (Seam 2)
   internal/contract/  Go-side contract types, pinned to /contract fixtures
   internal/config/    env config (ADR 0007)
-  internal/postgres/  pool + embedded migrations
+  internal/membership/  accounts, sessions, TOS, Platform Admin role
+  internal/credits/   double-entry credit Ledger (ticket 03)
+  internal/anonymize/  anonymization pipeline (ticket 04)
+  internal/objectstore/  S3 blob-storage seam (ADR 0006, ticket 05)
+  internal/taxonomy/  taxonomy + auto-categorization (ticket 06)
+  internal/requests/  data Requests + agent clarification (ticket 07)
+  internal/modules/   Module registry (ticket 08)
+  internal/postgres/  pool + embedded migrations, Store implementations
   internal/mailsink/  dev log mail sink
 agent/
   src/thresh_agent/
@@ -60,8 +69,11 @@ agent/
     clarify.py        clarification loop + web-chat turn (ticket 07)
     gateway.py        model gateway: fake + OpenAI-compatible
 web/
-  app/app.vue         status page
-  app/status.ts       backend status parsing
+  app/app.vue         shell + nav (status, tickets 01–08)
+  app/auth.ts, credits.ts, assets.ts, taxonomy.ts, requests.ts, modules.ts
+                      API clients + parsers pinning backend document shapes
+  app/pages/          status, login/register/verify, tos, admin, consumer,
+                      organization, requests, modules
 contract/
   schemas/            envelope + ping-pair JSON Schema
   fixtures/           golden messages both sides test against

@@ -18,6 +18,7 @@ import (
 	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/objectstore"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/postgres"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/taxonomy"
@@ -158,6 +159,10 @@ func run() error {
 		}
 	}
 
+	// Module registry (ticket 08): DB-only — no object storage dependency.
+	// Any active account may upload; the Platform Admin promotes.
+	modulesSvc := modules.NewService(postgres.NewModulesStore(pool))
+
 	handler := api.NewHandler(api.Deps{
 		Agent:   agentclient.New(cfg.AgentBaseURL),
 		Version: version,
@@ -173,6 +178,7 @@ func run() error {
 		Assets:   assetsDeps,
 		Taxonomy: taxonomyDeps,
 		Requests: requestsDeps,
+		Modules:  &api.ModulesDeps{Service: modulesSvc},
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,

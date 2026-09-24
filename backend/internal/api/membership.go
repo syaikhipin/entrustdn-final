@@ -409,6 +409,18 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) (membersh
 	return acct, true
 }
 
+// callerIsAdmin reports whether the request's session belongs to a
+// Platform Admin, without writing an error response — for handlers where
+// admin is one permitted caller among several (e.g. module deprecation,
+// where the author is the other). Authentication failures still write.
+func (h *Handler) callerIsAdmin(w http.ResponseWriter, r *http.Request) bool {
+	_, acct, ok := h.sessionAuth(w, r)
+	if !ok {
+		return false
+	}
+	return acct.Role == membership.RolePlatformAdmin
+}
+
 // requireConsumer resolves the caller and refuses anyone but an approved
 // Data Consumer (the same contract-gates-the-surface rule requireAdmin and
 // requireOrg apply).
