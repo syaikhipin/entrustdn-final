@@ -17,6 +17,8 @@ import (
 	"github.com/syaikhipin/entrustdn-final/backend/internal/config"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/collections"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/conversations"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/objectstore"
@@ -163,11 +165,34 @@ func run() error {
 	// Any active account may upload; the Platform Admin promotes.
 	modulesSvc := modules.NewService(postgres.NewModulesStore(pool))
 
+	// Data Collections (ticket 12): re-asks open through the same
+	// conversations service shape the endpoints use, the delivery is
+	// cleaned through the pseudonym map's Delivery (ADR 0005) and charged
+	// through the Ledger. Pseudonyms ride the Postgres map even without S3
+	// — collections are DB-only.
+	agentClient := agentclient.New(cfg.AgentBaseURL)
+	pseudonymMap := postgres.NewPseudonymMap(pool, cfg.PseudonymHashKey)
+	convStore := postgres.NewConversationsStore(pool)
+	rosterStore := postgres.NewRosterStore(pool)
+	requestsStore := postgres.NewRequestsStore(pool)
+	creditsSvc := credits.NewService(postgres.NewCreditsStore(pool), postgres.CreditRulesLoader(pool))
+	convSvc := conversations.NewService(convStore,
+		api.AgentConversationAdapter{Client: agentClient}, cfg.PublicBaseURL)
+	colSvc := collections.NewService(collections.Deps{
+		Store:         postgres.NewCollectionsStore(pool),
+		Conversations: convStore,
+		Opener:        convSvc,
+		Roster:        rosterStore,
+		Requests:      requestsStore,
+	}).WithCredits(creditsSvc).
+		WithCleaner(anonymize.NewDelivery(pseudonymMap)).
+		WithPseudonyms(pseudonymMap)
+
 	// Member roster & conversations (ticket 11): DB-only like the modules —
 	// channels belong to the agent sidecar, not this process. Resumable
 	// links carry the deployment's public URL when one is configured.
 	handler := api.NewHandler(api.Deps{
-		Agent:   agentclient.New(cfg.AgentBaseURL),
+		Agent:   agentClient,
 		Version: version,
 		Store:   store,
 		Mail:    mail,
@@ -182,11 +207,12 @@ func run() error {
 		Taxonomy: taxonomyDeps,
 		Requests: requestsDeps,
 		Modules:  &api.ModulesDeps{Service: modulesSvc},
-		Roster:   &api.RosterDeps{Store: postgres.NewRosterStore(pool)},
+		Roster:   &api.RosterDeps{Store: rosterStore},
 		Conversations: &api.ConversationsDeps{
-			Store:         postgres.NewConversationsStore(pool),
+			Store:         convStore,
 			PublicBaseURL: cfg.PublicBaseURL,
 		},
+		Collections: &api.CollectionsDeps{Service: colSvc},
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,

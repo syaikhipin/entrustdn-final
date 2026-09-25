@@ -58,6 +58,7 @@ type Deps struct {
 	Modules       *ModulesDeps
 	Roster        *RosterDeps
 	Conversations *ConversationsDeps
+	Collections   *CollectionsDeps
 }
 
 // Handler serves the backend API.
@@ -73,6 +74,7 @@ type Handler struct {
 	modules       *modulesHandlers
 	roster        *rosterHandlers
 	conversations *conversationsHandlers
+	collections   *collectionsHandlers
 	mux           *http.ServeMux
 }
 
@@ -137,6 +139,10 @@ func NewHandler(deps Deps) http.Handler {
 
 	if deps.Conversations != nil {
 		h.registerConversationRoutes(deps.Conversations)
+	}
+
+	if deps.Collections != nil {
+		h.registerCollectionsRoutes(deps.Collections)
 	}
 
 	return withCORS(h.mux)

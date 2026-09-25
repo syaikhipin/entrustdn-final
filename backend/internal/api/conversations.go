@@ -62,7 +62,7 @@ func (h *Handler) registerConversationRoutes(deps *ConversationsDeps) {
 		return
 	}
 	h.conversations = &conversationsHandlers{
-		svc: conversations.NewService(deps.Store, agentConversationAdapter{client: cc}, deps.PublicBaseURL),
+		svc: conversations.NewService(deps.Store, AgentConversationAdapter{Client: cc}, deps.PublicBaseURL),
 	}
 	h.mux.HandleFunc("POST /api/v1/conversations", h.handleStartConversation)
 	h.mux.HandleFunc("GET /api/v1/conversations", h.handleListConversations)
@@ -74,18 +74,20 @@ func (h *Handler) registerConversationRoutes(deps *ConversationsDeps) {
 	h.mux.HandleFunc("GET /api/v1/member/resume/{token}", h.handleMemberResume)
 }
 
-// agentConversationAdapter fits the agent client to conversations.Agent:
-// the backend speaks to the agent only through the contract.
-type agentConversationAdapter struct {
-	client ConversationClient
+// AgentConversationAdapter fits the agent client to conversations.Agent:
+// the backend speaks to the agent only through the contract. Exported
+// because main (cmd/api) needs the same fit when it wires the collection
+// service's re-ask opener to the agent client.
+type AgentConversationAdapter struct {
+	Client ConversationClient
 }
 
-func (a agentConversationAdapter) Start(ctx context.Context, req contract.ConversationStartRequest) (contract.ConversationResponse, error) {
-	return a.client.StartConversation(ctx, req)
+func (a AgentConversationAdapter) Start(ctx context.Context, req contract.ConversationStartRequest) (contract.ConversationResponse, error) {
+	return a.Client.StartConversation(ctx, req)
 }
 
-func (a agentConversationAdapter) Reply(ctx context.Context, req contract.ConversationReplyRequest) (contract.ConversationResponse, error) {
-	return a.client.Converse(ctx, req)
+func (a AgentConversationAdapter) Reply(ctx context.Context, req contract.ConversationReplyRequest) (contract.ConversationResponse, error) {
+	return a.Client.Converse(ctx, req)
 }
 
 // rosterHandlers holds the resolved collaborators for the roster routes.
@@ -241,6 +243,10 @@ type startConversationRequest struct {
 	MemberID  string   `json:"member_id"`
 	Topic     string   `json:"topic"`
 	Questions []string `json:"questions"`
+	// RequestID optionally ties the conversation to one Data Collection's
+	// request (ticket 12): the collection's sync matches conversations by
+	// request ID, so gathering conversations carry it.
+	RequestID string `json:"request_id"`
 }
 
 // handleStartConversation opens a conversation with one roster Member:
@@ -267,6 +273,7 @@ func (h *Handler) handleStartConversation(w http.ResponseWriter, r *http.Request
 	}
 	conv, err := h.conversations.svc.Start(r.Context(), conversations.Start{
 		OrgID:      org.ID,
+		RequestID:  req.RequestID,
 		MemberID:   member.ID,
 		MemberName: member.DisplayName,
 		Contact:    member.Contact,

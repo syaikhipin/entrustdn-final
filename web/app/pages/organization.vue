@@ -20,6 +20,16 @@ import {
   type Asset,
 } from "~/assets";
 import { erasePseudonyms, listPseudonyms, type PseudonymList } from "~/pseudonyms";
+import { listMembers, type Member } from "~/roster";
+import {
+  createCollection,
+  listCollections,
+  startGatheringConversation,
+  statusLabel,
+  syncCollection,
+  type Collection,
+} from "~/collections";
+import { fetchMyRequests, type DataRequest } from "~/requests";
 import {
   fetchTerms,
   setCategories,
@@ -69,6 +79,18 @@ const correcting = ref<string | null>(null);
 const correctionPicks = ref<Partial<Record<TaxonomyCategory, string>>>({});
 const correctionError = ref<string | null>(null);
 
+// Collections state (ticket 12): the roster and clarified requests the
+// creation form picks from, and the collections themselves.
+const members = ref<Member[]>([]);
+const clarifiedRequests = ref<DataRequest[]>([]);
+const collections = ref<Collection[]>([]);
+const colRequestID = ref("");
+const colMemberIDs = ref<string[]>([]);
+const colQuestions = ref("");
+const colDeadline = ref("");
+const colError = ref<string | null>(null);
+const syncing = ref<string | null>(null);
+
 onMounted(async () => {
   await restore();
   ready.value = true;
@@ -76,6 +98,7 @@ onMounted(async () => {
     await refreshAssets();
     await refreshPseudonyms();
     await refreshTerms();
+    await refreshCollections();
   }
 });
 
@@ -119,6 +142,129 @@ async function refreshTerms() {
 // termsFor lists the vocabulary under one axis for a picker.
 function termsFor(category: TaxonomyCategory): Term[] {
   return terms.value.filter((t) => t.category === category);
+}
+
+// --- Collections (ticket 12) ---
+
+// refreshCollections loads the roster, the org's clarified requests, and
+// the collections themselves. The roster and requests feed the creation
+// form; their failures degrade to a create-form-less list.
+async function refreshCollections() {
+  if (!token.value) return;
+  try {
+    members.value = await listMembers(backendURL, token.value);
+  } catch (e) {
+    members.value = [];
+    colError.value = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    const reqs = await fetchMyRequests(backendURL, token.value);
+    clarifiedRequests.value = reqs.filter((r) => r.status === "clarified");
+  } catch (e) {
+    clarifiedRequests.value = [];
+    colError.value = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    collections.value = await listCollections(backendURL, token.value);
+  } catch (e) {
+    colError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+// submitCollection opens a Collection: one question per line, members
+// multi-picked from the roster.
+async function submitCollection() {
+  if (!token.value) return;
+  busy.value = true;
+  colError.value = null;
+  notice.value = null;
+  try {
+    const questions = colQuestions.value
+      .split("\n")
+      .map((q) => q.trim())
+      .filter((q) => q !== "");
+    const created = await createCollection(backendURL, token.value, {
+      requestId: colRequestID.value,
+      memberIds: colMemberIDs.value,
+      questions,
+      deadline: colDeadline.value ? new Date(colDeadline.value).toISOString() : "",
+    });
+    notice.value = `Collection opened — ${created.items.length} items to gather. Open each member's conversation from the roster, and sync here as answers arrive.`;
+    colRequestID.value = "";
+    colMemberIDs.value = [];
+    colQuestions.value = "";
+    colDeadline.value = "";
+    await refreshCollections();
+  } catch (e) {
+    colError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+// submitSync runs the gathering step for one collection: ingests new
+// answers, opens re-asks, finalizes when the triggers say so.
+async function submitSync(id: string) {
+  if (!token.value) return;
+  syncing.value = id;
+  colError.value = null;
+  try {
+    const got = await syncCollection(backendURL, token.value, id);
+    notice.value =
+      got.status === "completed"
+        ? "Collection completed — every item holds an accepted answer."
+        : got.status === "incomplete"
+          ? "Collection flagged incomplete — the missing-data summary shows the gaps."
+          : "Synced — new answers ingested, re-asks opened where needed.";
+    await refreshCollections();
+  } catch (e) {
+    colError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    syncing.value = null;
+  }
+}
+
+// startConversations opens each member's gathering conversation for one
+// collection — every conversation carries the request ID so the sync
+// matches it. Members already covered by an open conversation (the sync
+// shows their items with rounds) are skipped: asking twice is over-surveying.
+async function startConversations(c: Collection) {
+  if (!token.value) return;
+  syncing.value = c.id;
+  colError.value = null;
+  notice.value = null;
+  try {
+    let opened = 0;
+    for (const it of c.items) {
+      if (it.rounds.length > 0 || it.status !== "collecting") continue;
+      await startGatheringConversation(backendURL, token.value, {
+        memberId: it.memberId,
+        memberName: it.memberName,
+        requestId: c.requestId,
+        questions: [it.question],
+      });
+      opened++;
+    }
+    notice.value =
+      opened > 0
+        ? `Opened ${opened} conversation${opened === 1 ? "" : "s"} — hand each member their resumable link, then sync here as answers arrive.`
+        : "Every member already has a conversation — sync to pick up new answers.";
+    await refreshCollections();
+  } catch (e) {
+    colError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    syncing.value = null;
+  }
+}
+
+// itemProgress renders one item's standing for the collection table.
+function itemProgress(status: string): string {
+  const labels: Record<string, string> = {
+    collecting: "waiting",
+    accepted: "accepted",
+    blocked: "blocked",
+  };
+  return labels[status] ?? status;
 }
 
 // startCorrection opens the correction row seeded with the asset's current
@@ -498,6 +644,120 @@ async function openDownload(a: Asset) {
         </table>
       </section>
 
+      <!-- Collections (ticket 12) -->
+      <section class="card">
+        <h3>Data Collections</h3>
+        <p>
+          Turn a clarified Request into a gathering effort: pick the members,
+          list the questions, and sync as answers arrive. Quality triggers
+          check every answer — bad ones get re-asked automatically, and a
+          member who can't produce a good answer blocks their item with the
+          reason surfaced.
+        </p>
+        <p v-if="colError" class="error-text">{{ colError }}</p>
+
+        <form v-if="members.length && clarifiedRequests.length" class="collection-form" @submit.prevent="submitCollection">
+          <h4>Open a collection</h4>
+          <label>
+            Request
+            <select v-model="colRequestID" required>
+              <option value="" disabled>Choose a clarified request…</option>
+              <option v-for="r in clarifiedRequests" :key="r.id" :value="r.id">
+                {{ r.description }} ({{ r.format }})
+              </option>
+            </select>
+          </label>
+          <label>
+            Members
+            <div class="member-picks">
+              <label v-for="m in members" :key="m.id" class="member-pick">
+                <input v-model="colMemberIDs" type="checkbox" :value="m.id" />
+                {{ m.displayName }} <span class="hint">{{ m.contact }}</span>
+              </label>
+            </div>
+          </label>
+          <label>
+            Questions — one per line
+            <textarea v-model="colQuestions" rows="3" placeholder="What is your farm size?&#10;Which crops did you sow?" required></textarea>
+          </label>
+          <label>
+            Deadline (optional)
+            <input v-model="colDeadline" type="datetime-local" />
+          </label>
+          <button class="primary" type="submit" :disabled="busy || !colRequestID || !colMemberIDs.length">
+            {{ busy ? "Opening…" : "Open collection" }}
+          </button>
+          <p class="hint">
+            After opening, "Start conversations" asks each member your
+            questions over their channel; "Sync" picks the answers up.
+          </p>
+        </form>
+        <p v-else class="hint">
+          Collections need roster members and a clarified request —
+          {{ members.length ? "no clarified request yet" : "no members on the roster yet" }}.
+        </p>
+
+        <p v-if="collections.length === 0" class="hint">No collections yet.</p>
+        <table v-else class="assets">
+          <thead>
+            <tr>
+              <th>Request</th>
+              <th>Status</th>
+              <th>Items</th>
+              <th>Missing</th>
+              <th>Updated</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in collections" :key="c.id">
+              <td><code class="small">{{ c.requestId }}</code></td>
+              <td>
+                <span class="pill" :class="c.status === 'completed' ? 'ok' : c.status === 'incomplete' ? 'warn' : ''">
+                  {{ statusLabel(c.status) }}
+                </span>
+              </td>
+              <td class="items-cell">
+                <span v-for="it in c.items" :key="it.memberId + it.question" class="item-line">
+                  <strong>{{ it.memberName }}</strong> — {{ it.question }}:
+                  <span class="pill" :class="it.status === 'accepted' ? 'ok' : it.status === 'blocked' ? 'bad' : ''">
+                    {{ itemProgress(it.status) }}
+                  </span>
+                  <span v-if="it.reasks" class="hint">({{ it.reasks }} re-ask{{ it.reasks === 1 ? "" : "s" }})</span>
+                </span>
+              </td>
+              <td class="items-cell">
+                <template v-if="c.missing.length">
+                  <span v-for="m in c.missing" :key="m.memberName + m.question" class="item-line">
+                    <strong>{{ m.memberName }}</strong> — {{ m.question }}: {{ m.reason }}
+                  </span>
+                </template>
+                <span v-else class="hint">—</span>
+              </td>
+              <td>{{ formatDate(c.updatedAt) }}</td>
+              <td class="actions">
+                <button
+                  v-if="c.status === 'collecting'"
+                  class="secondary"
+                  :disabled="syncing === c.id"
+                  @click="startConversations(c)"
+                >
+                  {{ syncing === c.id ? "Starting…" : "Start conversations" }}
+                </button>
+                <button
+                  v-if="c.status === 'collecting'"
+                  class="secondary"
+                  :disabled="syncing === c.id"
+                  @click="submitSync(c.id)"
+                >
+                  {{ syncing === c.id ? "Syncing…" : "Sync" }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
       <!-- Pseudonym map (ticket 05) -->
       <section class="card">
         <h3>Pseudonym map</h3>
@@ -575,6 +835,30 @@ table.assets td {
 }
 .edit-form label {
   margin-bottom: 0.6rem;
+}
+.collection-form h4 {
+  margin: 0 0 0.5rem;
+}
+.member-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+}
+.member-pick {
+  display: block;
+  font-weight: normal;
+  margin: 0;
+}
+.items-cell {
+  max-width: 22rem;
+}
+.item-line {
+  display: block;
+  font-size: 0.88rem;
+  margin-bottom: 0.2rem;
+}
+code.small {
+  font-size: 0.82rem;
 }
 .edit-actions {
   display: flex;

@@ -5,7 +5,13 @@
 // categories, facet filtering, and the cached price from the current price
 // book. Requests (buying) arrive in later tickets.
 import { errFrom, fetchMyCredits, formatCredits, formatMicros, type CreditsView } from "~/credits";
-import { formatBytes } from "~/assets";
+import { formatBytes, formatDate } from "~/assets";
+import {
+  downloadDelivery,
+  listConsumerCollections,
+  statusLabel,
+  type Collection,
+} from "~/collections";
 import {
   fetchCatalog,
   formatConfidence,
@@ -22,6 +28,12 @@ const ready = ref(false);
 const credits = ref<CreditsView | null>(null);
 const error = ref<string | null>(null);
 
+// Collections state (ticket 12): what's being gathered in the consumer's
+// name, and the delivery downloads.
+const collections = ref<Collection[]>([]);
+const collectionsError = ref<string | null>(null);
+const downloading = ref<string | null>(null);
+
 // Catalog state (ticket 06). Facet selection is one term per axis; the
 // consumer narrows the catalog client-side against the whole-catalog facet
 // counts.
@@ -36,6 +48,7 @@ onMounted(async () => {
   if (token.value) {
     await load();
     await loadCatalog();
+    await loadCollections();
   }
 });
 
@@ -62,6 +75,34 @@ async function loadCatalog() {
     catalog.value = await fetchCatalog(backendURL, token.value);
   } catch (e) {
     catalogError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+// loadCollections brings the consumer's collections — the gathering
+// efforts running in their name (ticket 12).
+async function loadCollections() {
+  if (!token.value) return;
+  collectionsError.value = null;
+  try {
+    collections.value = await listConsumerCollections(backendURL, token.value);
+  } catch (e) {
+    collectionsError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+// download streams the anonymized delivery for one finalized collection —
+// charged to the Ledger at the unique-data rate.
+async function download(c: Collection) {
+  if (!token.value) return;
+  downloading.value = c.id;
+  collectionsError.value = null;
+  try {
+    await downloadDelivery(backendURL, token.value, c.id);
+    await load();
+  } catch (e) {
+    collectionsError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    downloading.value = null;
   }
 }
 
@@ -244,6 +285,68 @@ function myDelta(mov: CreditsView["movements"][number]): number {
         </template>
       </section>
 
+      <!-- Collections (ticket 12) -->
+      <section class="card">
+        <h3>Your collections</h3>
+        <p>
+          Data being gathered for you — a Farmer Organization's members answer
+          over their own channels, every answer passes quality checks, and
+          the delivery is anonymized before it reaches you. An incomplete
+          collection shows exactly what's missing and why.
+        </p>
+        <p v-if="collectionsError" class="error-text">{{ collectionsError }}</p>
+        <p v-if="collections.length === 0" class="hint">
+          No collections yet — once an organization starts gathering data for
+          one of your requests, it appears here.
+        </p>
+        <table v-else class="ledger">
+          <thead>
+            <tr>
+              <th>Request</th>
+              <th>Status</th>
+              <th>Gathered</th>
+              <th>Missing</th>
+              <th>Updated</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in collections" :key="c.id">
+              <td><code class="small">{{ c.requestId }}</code></td>
+              <td>
+                <span class="pill" :class="c.status === 'completed' ? 'ok' : c.status === 'incomplete' ? 'warn' : ''">
+                  {{ statusLabel(c.status) }}
+                </span>
+              </td>
+              <td>
+                {{ c.items.filter((it) => it.status === "accepted").length }} / {{ c.items.length }}
+                <span v-if="c.items.length" class="hint">items</span>
+              </td>
+              <td class="items-cell">
+                <template v-if="c.missingCount > 0">
+                  <span class="item-line">
+                    {{ c.missingCount }} item{{ c.missingCount === 1 ? "" : "s" }} had no
+                    usable answer — the delivered data notes the gaps.
+                  </span>
+                </template>
+                <span v-else class="hint">—</span>
+              </td>
+              <td>{{ formatDate(c.updatedAt) }}</td>
+              <td class="actions-cell">
+                <button
+                  v-if="c.status !== 'collecting'"
+                  class="secondary"
+                  :disabled="downloading === c.id"
+                  @click="download(c)"
+                >
+                  {{ downloading === c.id ? "Preparing…" : "Download delivery" }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
       <section class="card">
         <h3>Credits</h3>
         <p class="hint">
@@ -357,5 +460,19 @@ function myDelta(mov: CreditsView["movements"][number]): number {
 }
 .cats .pill {
   margin-right: 0.3rem;
+}
+.items-cell {
+  max-width: 20rem;
+}
+.item-line {
+  display: block;
+  font-size: 0.88rem;
+  margin-bottom: 0.2rem;
+}
+.actions-cell {
+  white-space: nowrap;
+}
+code.small {
+  font-size: 0.82rem;
 }
 </style>
