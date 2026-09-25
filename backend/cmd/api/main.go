@@ -163,6 +163,9 @@ func run() error {
 	// Any active account may upload; the Platform Admin promotes.
 	modulesSvc := modules.NewService(postgres.NewModulesStore(pool))
 
+	// Member roster & conversations (ticket 11): DB-only like the modules —
+	// channels belong to the agent sidecar, not this process. Resumable
+	// links carry the deployment's public URL when one is configured.
 	handler := api.NewHandler(api.Deps{
 		Agent:   agentclient.New(cfg.AgentBaseURL),
 		Version: version,
@@ -179,6 +182,11 @@ func run() error {
 		Taxonomy: taxonomyDeps,
 		Requests: requestsDeps,
 		Modules:  &api.ModulesDeps{Service: modulesSvc},
+		Roster:   &api.RosterDeps{Store: postgres.NewRosterStore(pool)},
+		Conversations: &api.ConversationsDeps{
+			Store:         postgres.NewConversationsStore(pool),
+			PublicBaseURL: cfg.PublicBaseURL,
+		},
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,

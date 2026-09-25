@@ -13,7 +13,7 @@ S3_BUCKET ?= thresh-assets
 S3_ACCESS_KEY_ID ?= thresh
 S3_SECRET_KEY ?= thresh-minio
 
-.PHONY: help dev dev-postgres dev-backend dev-agent dev-web test test-backend test-agent test-web build clean
+.PHONY: help dev dev-postgres dev-backend dev-agent dev-web test test-backend test-backend-pg test-integration test-agent test-web build clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -57,6 +57,14 @@ test-backend: ## go test -race ./... (postgres tests need TEST_DATABASE_URL)
 test-backend-pg: ## go test -race with Postgres up (compose)
 	docker compose up -d --wait postgres
 	cd backend && TEST_DATABASE_URL=$(DATABASE_URL) go test -race ./...
+
+test-integration: ## Seam 2 thin suite: real backend+agent processes, kill & resume (needs compose postgres)
+	docker compose up -d --wait postgres
+	@docker compose exec -T postgres psql -U thresh -d thresh -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='thresh_integration' AND pid <> pg_backend_pid()" > /dev/null
+	@docker compose exec -T postgres psql -U thresh -d thresh -c "DROP DATABASE IF EXISTS thresh_integration" > /dev/null
+	@docker compose exec -T postgres psql -U thresh -d thresh -c "CREATE DATABASE thresh_integration" > /dev/null
+	cd backend && THRESH_INTEGRATION_DATABASE_URL=postgres://thresh:thresh@localhost:5432/thresh_integration?sslmode=disable \
+		go test ./tests/integration/ -timeout 300s
 
 test-agent: ## pytest via uv
 	cd agent && uv run pytest tests/ -q

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
 )
@@ -267,3 +268,154 @@ func TestClarifyResponseValidateRejectsMalformedUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestConversationStartRequestDecodesFromFixture(t *testing.T) {
+	var env contract.Envelope
+	if err := json.Unmarshal(loadFixture(t, "conversation-start-request.json"), &env); err != nil {
+		t.Fatalf("fixture is not valid envelope JSON: %v", err)
+	}
+	if env.Type != contract.TypeConversationStartRequest {
+		t.Errorf("Type = %q, want %q", env.Type, contract.TypeConversationStartRequest)
+	}
+	var req contract.ConversationStartRequest
+	if err := env.PayloadInto(&req); err != nil {
+		t.Fatalf("payload does not decode as ConversationStartRequest: %v", err)
+	}
+	if req.ConversationID != "conv-01" {
+		t.Errorf("ConversationID = %q, want %q", req.ConversationID, "conv-01")
+	}
+	if req.RequestID != "req-clarify-01" {
+		t.Errorf("RequestID = %q, want %q", req.RequestID, "req-clarify-01")
+	}
+	if req.Contact != "whatsapp:+353860000001" {
+		t.Errorf("Contact = %q, want the channel-qualified contact point", req.Contact)
+	}
+	if len(req.Questions) != 3 {
+		t.Errorf("Questions = %+v, want three", req.Questions)
+	}
+	if req.ResumeURL == "" {
+		t.Error("ResumeURL is empty, want the Member's resumable link")
+	}
+}
+
+func TestConversationReplyRequestDecodesFromFixture(t *testing.T) {
+	var env contract.Envelope
+	if err := json.Unmarshal(loadFixture(t, "conversation-reply-request.json"), &env); err != nil {
+		t.Fatalf("fixture is not valid envelope JSON: %v", err)
+	}
+	if env.Type != contract.TypeConversationReplyRequest {
+		t.Errorf("Type = %q, want %q", env.Type, contract.TypeConversationReplyRequest)
+	}
+	var req contract.ConversationReplyRequest
+	if err := env.PayloadInto(&req); err != nil {
+		t.Fatalf("payload does not decode as ConversationReplyRequest: %v", err)
+	}
+	if req.ConversationID != "conv-01" {
+		t.Errorf("ConversationID = %q, want %q", req.ConversationID, "conv-01")
+	}
+	if req.Message == "" {
+		t.Error("Message is empty, want the Member's reply")
+	}
+	if req.Contact != "whatsapp:+353860000001" {
+		t.Errorf("Contact = %q, want the channel-qualified contact point", req.Contact)
+	}
+	if len(req.Questions) != 3 {
+		t.Errorf("Questions = %+v, want the full question list", req.Questions)
+	}
+	if len(req.Thread) != 1 || req.Thread[0].Role != "agent" {
+		t.Errorf("Thread = %+v, want one agent turn", req.Thread)
+	}
+	if req.ResumeURL == "" {
+		t.Error("ResumeURL is empty, want the link re-offered after partial answers")
+	}
+}
+
+func TestConversationResponseDecodesFromFixture(t *testing.T) {
+	var env contract.Envelope
+	if err := json.Unmarshal(loadFixture(t, "conversation-reply-response.json"), &env); err != nil {
+		t.Fatalf("fixture is not valid envelope JSON: %v", err)
+	}
+	if env.Type != contract.TypeConversationResponse {
+		t.Errorf("Type = %q, want %q", env.Type, contract.TypeConversationResponse)
+	}
+	var resp contract.ConversationResponse
+	if err := env.PayloadInto(&resp); err != nil {
+		t.Fatalf("payload does not decode as ConversationResponse: %v", err)
+	}
+	if resp.ConversationID != "conv-01" {
+		t.Errorf("ConversationID = %q, want %q", resp.ConversationID, "conv-01")
+	}
+	if !resp.Delivered {
+		t.Error("Delivered = false, want true")
+	}
+	if resp.Status != contract.ConversationAwaitingMember {
+		t.Errorf("Status = %q, want %q", resp.Status, contract.ConversationAwaitingMember)
+	}
+	if len(resp.Thread) != 3 || len(resp.Answers) != 1 {
+		t.Errorf("Thread/Answers = (%+v, %+v), want three turns and one answer", resp.Thread, resp.Answers)
+	}
+}
+
+func TestConversationPayloadsRejectUnknownFieldsAndBadStatus(t *testing.T) {
+	raw := loadFixture(t, "conversation-start-request.json")
+	var env contract.Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		into    any
+	}{
+		{
+			name:    "start request with an unknown field",
+			payload: `{"conversation_id":"c","member_name":"m","contact":"whatsapp:+1","topic":"t","questions":["q"],"resume_url":"","sneaky":1}`,
+			into:    &contract.ConversationStartRequest{},
+		},
+		{
+			name:    "response with an invalid status",
+			payload: `{"conversation_id":"c","delivered":true,"status":"telepathy","thread":[],"answers":[]}`,
+			into:    &contract.ConversationResponse{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env.Payload = json.RawMessage(tt.payload)
+			if err := env.PayloadInto(tt.into); err == nil {
+				t.Errorf("payload accepted, want rejection: %s", tt.payload)
+			}
+		})
+	}
+}
+
+func TestNewConversationRequestEnvelopes(t *testing.T) {
+	start := contract.ConversationStartRequest{
+		ConversationID: "c1", MemberName: "Siobhán", Contact: "telegram:42",
+		Topic: "crops", Questions: []string{"q1"}, ResumeURL: "https://x/y",
+	}
+	env, err := contract.NewConversationStartRequest(start, testTime())
+	if err != nil {
+		t.Fatalf("NewConversationStartRequest: %v", err)
+	}
+	if env.Type != contract.TypeConversationStartRequest || env.Version != contract.Version {
+		t.Errorf("envelope = %+v, want a v1 conversation.start.request", env)
+	}
+	if err := env.PayloadInto(&contract.ConversationStartRequest{}); err != nil {
+		t.Errorf("built payload does not round-trip: %v", err)
+	}
+
+	reply := contract.ConversationReplyRequest{
+		ConversationID: "c1", Message: "spring barley",
+		Thread: []contract.ThreadMessage{{Role: "agent", Body: "what crop?"}},
+	}
+	env, err = contract.NewConversationReplyRequest(reply, testTime())
+	if err != nil {
+		t.Fatalf("NewConversationReplyRequest: %v", err)
+	}
+	if env.Type != contract.TypeConversationReplyRequest {
+		t.Errorf("envelope type = %q, want %q", env.Type, contract.TypeConversationReplyRequest)
+	}
+}
+
+func testTime() time.Time { return time.Date(2026, 9, 24, 9, 0, 0, 0, time.UTC) }

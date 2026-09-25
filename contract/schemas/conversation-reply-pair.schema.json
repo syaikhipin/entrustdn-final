@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thresh.dev/contract/conversation-reply-pair.schema.json",
+  "title": "Thresh conversation.reply request/response payloads",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/conversation_reply_request" },
+    { "$ref": "#/$defs/conversation_response" }
+  ],
+  "$defs": {
+    "thread_message": {
+      "type": "object",
+      "description": "One turn of a Member conversation.",
+      "required": ["role", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "role": { "type": "string", "enum": ["agent", "member"] },
+        "body": { "type": "string", "minLength": 1 }
+      }
+    },
+    "conversation_reply_request": {
+      "type": "object",
+      "description": "Sent backend→agent when a Member's reply arrives (possibly days later, possibly after an agent restart): the conversation resumes mid-thread from the agent's checkpoint. The reply is typed text ('message') or a voice note ('audio', transcribed by the agent's env-keyed STT client) — exactly one of the two. The thread, contact point, question list, and resumable link ride along: the backend owns the durable record, and re-sending them lets a cold agent rebuild context, deliver on the right channel (re-offering the link after partial answers), and pace the same question list.",
+      "required": ["conversation_id", "thread", "contact", "questions"],
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["message"] },
+        { "required": ["audio"] }
+      ],
+      "properties": {
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Member's typed reply. Exactly one of message / audio."
+        },
+        "audio": {
+          "type": "object",
+          "description": "The Member's voice note, base64-encoded; the agent transcribes it with its STT client (env-keyed, faked in tests) and the transcript becomes the reply text.",
+          "required": ["data", "format"],
+          "additionalProperties": false,
+          "properties": {
+            "data": {
+              "type": "string",
+              "minLength": 1,
+              "contentEncoding": "base64"
+            },
+            "format": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Audio container/format hint, e.g. 'ogg', 'mp4' — rides the transcription upload as the filename extension."
+            }
+          }
+        },
+        "thread": {
+          "type": "array",
+          "description": "The thread so far, oldest first — the durable record the backend owns and re-sends, so the agent can rebuild its context even from a cold checkpoint.",
+          "items": { "$ref": "#/$defs/thread_message" }
+        },
+        "contact": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Member's channel-qualified contact point, e.g. 'whatsapp:+353860000001'."
+        },
+        "questions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "The conversation's full question list, in order."
+        },
+        "resume_url": {
+          "type": "string",
+          "description": "The Member's resumable link, re-offered after partial answers ('Members receive resumable links after partial answers'). Empty string when the deployment has no public URL."
+        }
+      }
+    },
+    "conversation_response": {
+      "type": "object",
+      "description": "The agent's answer for a conversation turn (start or reply): delivery acknowledgement, the conversation status, the full thread, and the answers gathered so far.",
+      "required": ["conversation_id", "delivered", "status", "thread", "answers"],
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "delivered": {
+          "type": "boolean",
+          "description": "Whether the agent's latest Channel message was acknowledged by the medium. A reply is only ever reported as sent once the medium has it."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["awaiting_member", "completed", "stopped"],
+          "description": "awaiting_member: paused on a checkpoint, waiting for the Member. completed: all questions answered (or the Member said done). stopped: the Member declined to continue."
+        },
+        "thread": { "type": "array", "items": { "$ref": "#/$defs/thread_message" } },
+        "answers": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

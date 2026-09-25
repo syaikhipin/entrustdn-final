@@ -167,3 +167,97 @@ def make_ping_response_envelope(
             nonce=nonce, pong=True, agent_version=agent_version
         ).model_dump(),
     )
+
+
+class ThreadMessage(BaseModel):
+    """One turn of a Member conversation (ticket 11)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = Field(pattern="^(agent|member)$")
+    body: str = Field(min_length=1)
+
+
+class ConversationStartRequest(BaseModel):
+    """Backend→agent: open a conversation with one Farmer Member over a
+    Channel. The agent asks the first question over the medium, then pauses
+    on a checkpoint until the Member replies (ADR 0001's pause-for-days)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: str = Field(min_length=1)
+    # Empty when the conversation is not (yet) tied to a Request.
+    request_id: str = ""
+    member_name: str = Field(min_length=1)
+    # Channel-qualified contact point from the roster:
+    # 'whatsapp:+353860000001', 'telegram:12345', 'email:member@farm.ie'.
+    contact: str = Field(min_length=1)
+    topic: str = Field(min_length=1)
+    questions: list[str] = Field(min_length=1)
+    # The Member's resumable link (no account — the token is the
+    # capability); appended to Channel messages. Empty when the deployment
+    # has no public URL.
+    resume_url: str = ""
+
+
+class ConversationAudio(BaseModel):
+    """A Member's voice note: base64-encoded bytes plus a format hint that
+    rides the transcription upload (ticket 11: STT is env-keyed, agent-side)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: str = Field(min_length=1, description="base64-encoded audio bytes")
+    format: str = Field(min_length=1, description="container hint, e.g. 'ogg'")
+
+
+class ConversationReplyRequest(BaseModel):
+    """Backend→agent: a Member's reply arrived — resume the conversation
+    mid-thread from the checkpoint. The reply is typed text ('message') or
+    a voice note ('audio', transcribed by the agent's env-keyed STT client)
+    — exactly one of the two. Thread, contact, and questions ride along:
+    the backend owns the durable record, and re-sending it lets a cold
+    agent rebuild context, deliver on the right channel, and pace the same
+    question list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: str = Field(min_length=1)
+    message: str = Field(default="", description="typed reply; exactly one of message / audio")
+    audio: ConversationAudio | None = None
+    thread: list[ThreadMessage] = Field(default_factory=list)
+    contact: str = Field(min_length=1)
+    questions: list[str] = Field(min_length=1)
+    # The Member's resumable link, re-offered after partial answers.
+    # Empty when the deployment has no public URL.
+    resume_url: str = ""
+
+    @model_validator(mode="after")
+    def _check_message_xor_audio(self) -> "ConversationReplyRequest":
+        if (self.message != "") == (self.audio is not None):
+            raise ValueError("a reply carries message or audio, not both (and not neither)")
+        return self
+
+
+class ConversationResponse(BaseModel):
+    """Agent→backend after any conversation turn: delivery acknowledgement,
+    status, the full thread, and the answers gathered so far."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: str = Field(min_length=1)
+    delivered: bool
+    status: str = Field(pattern="^(awaiting_member|completed|stopped)$")
+    thread: list[ThreadMessage] = Field(default_factory=list)
+    answers: list[str] = Field(default_factory=list)
+
+
+def make_conversation_response_envelope(
+    response: ConversationResponse, sent_at: datetime
+) -> Envelope:
+    """Build a conversation.response envelope."""
+    return Envelope(
+        version=CONTRACT_VERSION,
+        type="conversation.response",
+        sent_at=sent_at,
+        payload=response.model_dump(),
+    )

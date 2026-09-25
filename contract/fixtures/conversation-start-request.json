@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "type": "conversation.start.request",
+  "sent_at": "2026-09-24T09:00:00Z",
+  "payload": {
+    "conversation_id": "conv-01",
+    "request_id": "req-clarify-01",
+    "member_name": "Siobhán",
+    "contact": "whatsapp:+353860000001",
+    "topic": "this season's cropping on the member's farm",
+    "questions": [
+      "What crop did you plant this season?",
+      "How many hectares are under it?",
+      "Was the yield better than last year?"
+    ],
+    "resume_url": "https://thresh.dev/member/resume/tok-abc123"
+  }
+}

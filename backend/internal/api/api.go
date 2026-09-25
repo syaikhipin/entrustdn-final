@@ -40,31 +40,40 @@ type AgentClient interface {
 // Requests is optional: when nil, the request endpoints (ticket 07) do not
 // register — and it needs Agent to be a full AgentClient, since every chat
 // turn round-trips the Go↔Agent contract. Modules is optional: when nil,
-// the module registry endpoints (ticket 08) do not register.
+// the module registry endpoints (ticket 08) do not register. Roster is
+// optional: when nil, the Member roster endpoints (ticket 11) do not
+// register. Conversations is optional: when nil, the conversation
+// endpoints (ticket 11) do not register — and it needs Roster (a
+// conversation opens with a roster Member) and the Agent to speak
+// conversation turns.
 type Deps struct {
-	Agent    Pinger
-	Version  string
-	Store    membership.Store
-	Mail     mailsink.Sink
-	Credits  *CreditsDeps
-	Assets   *AssetsDeps
-	Taxonomy *TaxonomyDeps
-	Requests *RequestsDeps
-	Modules  *ModulesDeps
+	Agent         Pinger
+	Version       string
+	Store         membership.Store
+	Mail          mailsink.Sink
+	Credits       *CreditsDeps
+	Assets        *AssetsDeps
+	Taxonomy      *TaxonomyDeps
+	Requests      *RequestsDeps
+	Modules       *ModulesDeps
+	Roster        *RosterDeps
+	Conversations *ConversationsDeps
 }
 
 // Handler serves the backend API.
 type Handler struct {
-	agent    Pinger
-	version  string
-	store    membership.Store
-	mail     mailsink.Sink
-	credits  *creditsHandlers
-	assets   *assetsHandlers
-	taxonomy *taxonomyHandlers
-	requests *requestsHandlers
-	modules  *modulesHandlers
-	mux      *http.ServeMux
+	agent         Pinger
+	version       string
+	store         membership.Store
+	mail          mailsink.Sink
+	credits       *creditsHandlers
+	assets        *assetsHandlers
+	taxonomy      *taxonomyHandlers
+	requests      *requestsHandlers
+	modules       *modulesHandlers
+	roster        *rosterHandlers
+	conversations *conversationsHandlers
+	mux           *http.ServeMux
 }
 
 // allowedOrigins lists the browser origins allowed to call this API across
@@ -120,6 +129,14 @@ func NewHandler(deps Deps) http.Handler {
 
 	if deps.Modules != nil {
 		h.registerModulesRoutes(deps.Modules)
+	}
+
+	if deps.Roster != nil {
+		h.registerRosterRoutes(deps.Roster)
+	}
+
+	if deps.Conversations != nil {
+		h.registerConversationRoutes(deps.Conversations)
 	}
 
 	return withCORS(h.mux)

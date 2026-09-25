@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://thresh.dev/contract/conversation-start-pair.schema.json",
+  "title": "Thresh conversation.start request/response payloads",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/conversation_start_request" },
+    { "$ref": "#/$defs/conversation_response" }
+  ],
+  "$defs": {
+    "thread_message": {
+      "type": "object",
+      "description": "One turn of a Member conversation.",
+      "required": ["role", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "role": { "type": "string", "enum": ["agent", "member"] },
+        "body": { "type": "string", "minLength": 1 }
+      }
+    },
+    "conversation_start_request": {
+      "type": "object",
+      "description": "Sent backend→agent to open a conversation with one Farmer Member over a Channel: who, on which channel-qualified contact, about what, with the questions the conversation walks through. The agent asks the first question over the Channel, then pauses (checkpointed) until the Member replies.",
+      "required": [
+        "conversation_id", "member_name", "contact", "topic", "questions", "resume_url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "request_id": {
+          "type": "string",
+          "description": "The parent Request's ID; empty when the conversation is not (yet) tied to one."
+        },
+        "member_name": { "type": "string", "minLength": 1 },
+        "contact": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Channel-qualified contact point from the roster, e.g. 'whatsapp:+353860000001'."
+        },
+        "topic": { "type": "string", "minLength": 1 },
+        "questions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "resume_url": {
+          "type": "string",
+          "description": "The Member's resumable link (no account — the token is the capability); appended to Channel messages. Empty string when the deployment has no public URL."
+        }
+      }
+    },
+    "conversation_response": {
+      "type": "object",
+      "description": "The agent's answer for a conversation turn (start or reply): delivery acknowledgement, the conversation status, the full thread, and the answers gathered so far.",
+      "required": ["conversation_id", "delivered", "status", "thread", "answers"],
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "delivered": {
+          "type": "boolean",
+          "description": "Whether the agent's latest Channel message was acknowledged by the medium. A reply is only ever reported as sent once the medium has it."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["awaiting_member", "completed", "stopped"],
+          "description": "awaiting_member: paused on a checkpoint, waiting for the Member. completed: all questions answered (or the Member said done). stopped: the Member declined to continue."
+        },
+        "thread": { "type": "array", "items": { "$ref": "#/$defs/thread_message" } },
+        "answers": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

@@ -239,3 +239,177 @@ func NewClarifyRequest(req ClarifyRequest, sentAt time.Time) (Envelope, error) {
 		Payload: payload,
 	}, nil
 }
+
+// Conversation message types (ticket 11): the agent converses with Farmer
+// Members over Channels; the backend opens conversations and delivers
+// Member replies; the agent answers with delivery acknowledgement, status,
+// thread, and answers.
+const (
+	TypeConversationStartRequest = "conversation.start.request"
+	TypeConversationReplyRequest = "conversation.reply.request"
+	TypeConversationResponse     = "conversation.response"
+)
+
+// Conversation status values carried by ConversationResponse.
+const (
+	// ConversationAwaitingMember: paused on a checkpoint, waiting for the
+	// Member's reply — possibly for days (ADR 0001).
+	ConversationAwaitingMember = "awaiting_member"
+	// ConversationCompleted: all questions answered (or the Member said done).
+	ConversationCompleted = "completed"
+	// ConversationStopped: the Member declined to continue.
+	ConversationStopped = "stopped"
+)
+
+// ThreadMessage is one turn of a Member conversation.
+type ThreadMessage struct {
+	Role string `json:"role"` // "agent" | "member"
+	Body string `json:"body"`
+}
+
+// ConversationStartRequest is sent backend→agent to open a conversation
+// with one Farmer Member over a Channel.
+type ConversationStartRequest struct {
+	ConversationID string   `json:"conversation_id"`
+	RequestID      string   `json:"request_id"`
+	MemberName     string   `json:"member_name"`
+	Contact        string   `json:"contact"`
+	Topic          string   `json:"topic"`
+	Questions      []string `json:"questions"`
+	ResumeURL      string   `json:"resume_url"`
+}
+
+// UnmarshalJSON decodes strictly: unknown fields are contract violations
+// (additionalProperties: false in the JSON Schema).
+func (r *ConversationStartRequest) UnmarshalJSON(data []byte) error {
+	type plain ConversationStartRequest
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode((*plain)(r))
+}
+
+// ConversationReplyRequest is sent backend→agent when a Member's reply
+// arrives — possibly days later, possibly after an agent restart. The
+// reply is typed text (Message) or a voice note (Audio, transcribed by
+// the agent's env-keyed STT client) — exactly one of the two. Thread,
+// contact, questions, and the resumable link ride along: the backend owns
+// the durable record, and re-sending them lets a cold agent rebuild
+// context, deliver on the right channel (re-offering the link after
+// partial answers), and pace the same question list.
+type ConversationReplyRequest struct {
+	ConversationID string             `json:"conversation_id"`
+	Message        string             `json:"message,omitempty"`
+	Audio          *ConversationAudio `json:"audio,omitempty"`
+	Thread         []ThreadMessage    `json:"thread"`
+	Contact        string             `json:"contact"`
+	Questions      []string           `json:"questions"`
+	ResumeURL      string             `json:"resume_url,omitempty"`
+}
+
+// ConversationAudio is a Member's voice note: base64-encoded bytes plus a
+// format hint that rides the transcription upload.
+type ConversationAudio struct {
+	Data   string `json:"data"` // base64
+	Format string `json:"format"`
+}
+
+// Validate enforces the exactly-one-of rule: a reply carries text or
+// audio, never both, never neither.
+func (r ConversationReplyRequest) Validate() error {
+	hasText := r.Message != ""
+	hasAudio := r.Audio != nil
+	switch {
+	case hasText && hasAudio:
+		return fmt.Errorf("a reply carries message or audio, not both")
+	case !hasText && !hasAudio:
+		return fmt.Errorf("a reply needs message or audio")
+	}
+	return nil
+}
+
+// UnmarshalJSON decodes strictly: unknown fields are contract violations
+// (additionalProperties: false in the JSON Schema), and the
+// message-or-audio rule is enforced on decode.
+func (r *ConversationReplyRequest) UnmarshalJSON(data []byte) error {
+	type plain ConversationReplyRequest
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode((*plain)(r)); err != nil {
+		return err
+	}
+	return r.Validate()
+}
+
+// ConversationResponse is the agent→backend answer for any conversation
+// turn: delivery acknowledgement, status, the full thread, and the answers
+// gathered so far.
+type ConversationResponse struct {
+	ConversationID string          `json:"conversation_id"`
+	Delivered      bool            `json:"delivered"`
+	Status         string          `json:"status"`
+	Thread         []ThreadMessage `json:"thread"`
+	Answers        []string        `json:"answers"`
+}
+
+// UnmarshalJSON decodes strictly: unknown fields are contract violations
+// (additionalProperties: false in the JSON Schema).
+func (r *ConversationResponse) UnmarshalJSON(data []byte) error {
+	type plain ConversationResponse
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode((*plain)(r)); err != nil {
+		return err
+	}
+	switch r.Status {
+	case ConversationAwaitingMember, ConversationCompleted, ConversationStopped:
+	default:
+		return fmt.Errorf("conversation status %q is not one of the contract statuses", r.Status)
+	}
+	return nil
+}
+
+// Validate checks the response invariants the fixtures pin down.
+func (r ConversationResponse) Validate() error {
+	if r.ConversationID == "" {
+		return fmt.Errorf("conversation_id is empty")
+	}
+	switch r.Status {
+	case ConversationAwaitingMember, ConversationCompleted, ConversationStopped:
+	default:
+		return fmt.Errorf("conversation status %q is not one of the contract statuses", r.Status)
+	}
+	return nil
+}
+
+// NewConversationStartRequest builds an envelope around a
+// ConversationStartRequest payload.
+func NewConversationStartRequest(req ConversationStartRequest, sentAt time.Time) (Envelope, error) {
+	if len(req.Questions) == 0 {
+		return Envelope{}, fmt.Errorf("conversation start needs at least one question")
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return Envelope{}, fmt.Errorf("failed to marshal conversation start: %w", err)
+	}
+	return Envelope{
+		Version: Version,
+		Type:    TypeConversationStartRequest,
+		SentAt:  sentAt,
+		Payload: payload,
+	}, nil
+}
+
+// NewConversationReplyRequest builds an envelope around a
+// ConversationReplyRequest payload.
+func NewConversationReplyRequest(req ConversationReplyRequest, sentAt time.Time) (Envelope, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return Envelope{}, fmt.Errorf("failed to marshal conversation reply: %w", err)
+	}
+	return Envelope{
+		Version: Version,
+		Type:    TypeConversationReplyRequest,
+		SentAt:  sentAt,
+		Payload: payload,
+	}, nil
+}

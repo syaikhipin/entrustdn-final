@@ -15,6 +15,9 @@ from thresh_agent.contract import (
     CONTRACT_VERSION,
     ClarifyRequest,
     ClarifyResponse,
+    ConversationReplyRequest,
+    ConversationResponse,
+    ConversationStartRequest,
     Envelope,
     PingRequest,
     PingResponse,
@@ -133,7 +136,80 @@ class TestClarifyPair:
         return Draft202012Validator(json.loads((SCHEMAS / "envelope.schema.json").read_text()))
 
 
-class TestSchemaEnforcement:
+class TestConversationPairs:
+    """Ticket 11's contract pairs: conversation.start (open a Member
+    conversation over a Channel) and conversation.reply (resume
+    mid-thread, possibly days later). Pinned to the golden fixtures exactly
+    like the ping and clarify pairs; both share the conversation.response."""
+
+    def test_start_request_round_trip(self) -> None:
+        doc = load_fixture("conversation-start-request.json")
+        env = Envelope.model_validate(doc)
+        assert env.type == "conversation.start.request"
+        req = ConversationStartRequest.model_validate(env.payload)
+        assert req.conversation_id == "conv-01"
+        assert req.request_id == "req-clarify-01"
+        assert req.contact == "whatsapp:+353860000001"
+        assert len(req.questions) == 3
+
+    def test_reply_request_round_trip(self) -> None:
+        doc = load_fixture("conversation-reply-request.json")
+        env = Envelope.model_validate(doc)
+        assert env.type == "conversation.reply.request"
+        req = ConversationReplyRequest.model_validate(env.payload)
+        assert req.conversation_id == "conv-01"
+        assert req.message == "Spring barley, twelve hectares"
+        assert req.contact == "whatsapp:+353860000001"
+        assert len(req.questions) == 3
+        assert req.thread[0].role == "agent"
+
+    def test_response_round_trip(self) -> None:
+        for name in ("conversation-start-response.json", "conversation-reply-response.json"):
+            doc = load_fixture(name)
+            env = Envelope.model_validate(doc)
+            assert env.type == "conversation.response"
+            resp = ConversationResponse.model_validate(env.payload)
+            assert resp.conversation_id == "conv-01"
+            assert resp.delivered is True
+            assert resp.status == "awaiting_member"
+            assert resp.thread[0].role == "agent"
+
+    def test_requests_reject_unknown_fields(self) -> None:
+        for name, model in (
+            ("conversation-start-request.json", ConversationStartRequest),
+            ("conversation-reply-request.json", ConversationReplyRequest),
+        ):
+            doc = load_fixture(name)
+            doc["payload"]["extra"] = 1
+            with pytest.raises(Exception):
+                model.model_validate(doc["payload"])
+
+    def test_response_rejects_unknown_status(self) -> None:
+        doc = load_fixture("conversation-start-response.json")
+        doc["payload"]["status"] = "maybe"
+        with pytest.raises(Exception):
+            ConversationResponse.model_validate(doc["payload"])
+
+    def test_schemas_validate_conversation_fixtures(self) -> None:
+        start = Draft202012Validator(
+            json.loads((SCHEMAS / "conversation-start-pair.schema.json").read_text())
+        )
+        reply = Draft202012Validator(
+            json.loads((SCHEMAS / "conversation-reply-pair.schema.json").read_text())
+        )
+        env_validator = self._envelope_validator()
+        doc = load_fixture("conversation-start-request.json")
+        env_validator.validate(doc)
+        start.validate(doc["payload"])
+        doc = load_fixture("conversation-start-response.json")
+        env_validator.validate(doc)
+        start.validate(doc["payload"])
+        doc = load_fixture("conversation-reply-request.json")
+        env_validator.validate(doc)
+        reply.validate(doc["payload"])
+        doc = load_fixture("conversation-reply-response.json")
+        env_validator.validate(doc)
+        reply.validate(doc["payload"])
     """The JSON Schemas in /contract are the contract's source of truth —
     every golden fixture must validate against them, and hand-built
     violations must fail, so schema and typed models cannot drift."""

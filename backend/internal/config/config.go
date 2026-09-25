@@ -37,6 +37,10 @@ type Config struct {
 	// identifiers (ticket 05). Optional: when unset the database URL keys
 	// the HMAC so dev needs no extra setup.
 	PseudonymHashKey string
+	// PublicBaseURL prefixes the resumable links the Agent hands Farmer
+	// Members (ticket 11). Optional: when unset the conversation endpoints
+	// still register, but links carry the token with no URL to render.
+	PublicBaseURL string
 }
 
 // S3Config carries the S3-compatible connection facts (MinIO in dev).
@@ -104,6 +108,7 @@ platform records which version you accepted and when.`)
 	}
 
 	cfg.PseudonymHashKey = os.Getenv("PSEUDONYM_HASH_KEY")
+	cfg.PublicBaseURL = os.Getenv("THRESH_PUBLIC_BASE_URL")
 
 	return cfg, nil
 }

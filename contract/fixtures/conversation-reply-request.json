@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "type": "conversation.reply.request",
+  "sent_at": "2026-09-28T18:30:00Z",
+  "payload": {
+    "conversation_id": "conv-01",
+    "message": "Spring barley, twelve hectares",
+    "contact": "whatsapp:+353860000001",
+    "resume_url": "https://thresh.dev/member/resume/tok-abc123",
+    "questions": [
+      "What crop did you plant this season?",
+      "How many hectares are under it?",
+      "Was the yield better than last year?"
+    ],
+    "thread": [
+      {
+        "role": "agent",
+        "body": "What crop did you plant this season?"
+      }
+    ]
+  }
+}

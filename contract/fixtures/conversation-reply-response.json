@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "type": "conversation.response",
+  "sent_at": "2026-09-28T18:30:07Z",
+  "payload": {
+    "conversation_id": "conv-01",
+    "delivered": true,
+    "status": "awaiting_member",
+    "thread": [
+      {
+        "role": "agent",
+        "body": "What crop did you plant this season?"
+      },
+      { "role": "member", "body": "Spring barley, twelve hectares" },
+      {
+        "role": "agent",
+        "body": "How many hectares are under it?"
+      }
+    ],
+    "answers": ["Spring barley, twelve hectares"]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "type": "conversation.response",
+  "sent_at": "2026-09-24T09:00:05Z",
+  "payload": {
+    "conversation_id": "conv-01",
+    "delivered": true,
+    "status": "awaiting_member",
+    "thread": [
+      {
+        "role": "agent",
+        "body": "Hello! I'm collecting data about this season's cropping for Thresh. What crop did you plant this season?"
+      }
+    ],
+    "answers": []
+  }
+}
