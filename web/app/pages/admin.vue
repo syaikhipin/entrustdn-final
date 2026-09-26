@@ -22,6 +22,11 @@ import {
   type TaxonomyCategory,
   type Term,
 } from "~/taxonomy";
+import {
+  fetchGatewayConfig,
+  saveGatewayConfig,
+  type GatewayConfig,
+} from "~/payments";
 import { useSession } from "~/composables/useSession";
 
 const backendURL = useBackendURL();
@@ -64,6 +69,17 @@ const pricingError = ref<string | null>(null);
 const terms = ref<Term[]>([]);
 const taxError = ref<string | null>(null);
 const taxNotice = ref<string | null>(null);
+
+// Payment gateway form state (ticket 09). The credential fields stay blank
+// unless the admin is setting or rotating them — blank means keep stored.
+const gateway = ref<GatewayConfig | null>(null);
+const gatewayProvider = ref("");
+const gatewayApiKey = ref("");
+const gatewaySecret = ref("");
+const gatewayCurrency = ref("");
+const gatewayMicrosPerCent = ref<number | null>(null);
+const gatewayError = ref<string | null>(null);
+const gatewayNotice = ref<string | null>(null);
 const newCategory = ref<TaxonomyCategory>("crop");
 const newLabel = ref("");
 const newKeywords = ref("");
@@ -86,6 +102,7 @@ watch(ready, (isReady) => {
     load();
     loadPricing();
     loadTerms();
+    loadGateway();
   }
 });
 
@@ -132,6 +149,72 @@ const orgPercentProxy = computed<number | "">({
     }
   },
 });
+
+// loadGateway reads the masked gateway config. An unconfigured gateway is a
+// normal state — the form starts empty rather than erroring.
+async function loadGateway() {
+  if (!token.value) return;
+  gatewayError.value = null;
+  try {
+    applyGateway(await fetchGatewayConfig(backendURL, token.value));
+  } catch (e) {
+    gateway.value = null;
+    gatewayError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+// applyGateway fills the form from the masked config; credential inputs
+// always start blank.
+function applyGateway(cfg: GatewayConfig) {
+  gateway.value = cfg;
+  gatewayProvider.value = cfg.provider;
+  gatewayApiKey.value = "";
+  gatewaySecret.value = "";
+  gatewayCurrency.value = cfg.currency;
+  gatewayMicrosPerCent.value = cfg.microsPerCent > 0 ? cfg.microsPerCent : null;
+}
+
+// submitGateway saves the config. Blank credential fields ride as empty
+// strings — the backend keeps the stored values (blank-keeps-credential
+// rotation). Saving a blank provider disables top-ups.
+async function submitGateway() {
+  if (!token.value) return;
+  gatewayError.value = null;
+  gatewayNotice.value = null;
+  try {
+    const cfg = await saveGatewayConfig(backendURL, token.value, {
+      provider: gatewayProvider.value.trim(),
+      apiKey: gatewayApiKey.value,
+      webhookSecret: gatewaySecret.value,
+      currency: gatewayCurrency.value.trim(),
+      microsPerCent: gatewayMicrosPerCent.value ?? 0,
+    });
+    applyGateway(cfg);
+    gatewayNotice.value = cfg.enabled
+      ? `Gateway saved — top-ups are live via ${cfg.provider}.`
+      : "Gateway disabled — top-ups are off.";
+  } catch (e) {
+    gatewayError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+// disableGateway turns top-ups off entirely: an empty provider clears the
+// stored config.
+async function disableGateway() {
+  if (!token.value) return;
+  gatewayError.value = null;
+  gatewayNotice.value = null;
+  try {
+    applyGateway(await saveGatewayConfig(backendURL, token.value, {
+      provider: "",
+      currency: "",
+      microsPerCent: 0,
+    }));
+    gatewayNotice.value = "Gateway disabled — top-ups are off.";
+  } catch (e) {
+    gatewayError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
 
 async function decide(app: Application, decision: "approve" | "reject") {
   if (!token.value) return;
@@ -532,6 +615,73 @@ async function submitDeleteTerm(t: Term) {
           </p>
 
           <button class="primary" type="button" @click="saveRules">Save price book</button>
+        </template>
+      </section>
+
+      <!-- Payment gateway (ticket 09): server-side platform config -->
+      <section class="card">
+        <h3>Payment gateway</h3>
+        <p class="hint">
+          Top-ups ride a payment gateway you configure here — server-side
+          platform config, never a module. Credentials are stored server-side
+          and shown only as "set"; re-enter one only when rotating it. The
+          exchange rate says how many micro-credits one cent buys (10,000 →
+          €1 = 1 credit).
+        </p>
+        <p v-if="gatewayError" class="error-text">{{ gatewayError }}</p>
+        <p v-if="gatewayNotice" class="ok-text">{{ gatewayNotice }}</p>
+        <p v-if="!gateway && !gatewayError" class="hint">Loading gateway config…</p>
+        <template v-if="gateway">
+          <p>
+            <span class="pill" :class="gateway.enabled ? 'ok' : 'warn'">
+              {{ gateway.enabled ? `Enabled — ${gateway.provider}` : "Disabled — top-ups are off" }}
+            </span>
+            <span v-if="gateway.apiKeySet" class="hint"> · API key set</span>
+            <span v-if="gateway.webhookSecretSet" class="hint"> · webhook secret set</span>
+          </p>
+          <form @submit.prevent="submitGateway">
+            <label>
+              Provider
+              <input v-model="gatewayProvider" type="text" placeholder="stripe" />
+            </label>
+            <label>
+              API key
+              <input
+                v-model="gatewayApiKey"
+                type="password"
+                :placeholder="gateway.apiKeySet ? 'stored — leave blank to keep' : 'sk_live_…'"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              Webhook secret
+              <input
+                v-model="gatewaySecret"
+                type="password"
+                :placeholder="gateway.webhookSecretSet ? 'stored — leave blank to keep' : 'whsec_…'"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              Currency (ISO 4217)
+              <input v-model="gatewayCurrency" type="text" placeholder="eur" />
+            </label>
+            <label>
+              Micro-credits per cent
+              <input v-model.number="gatewayMicrosPerCent" type="number" min="1" step="1" />
+            </label>
+            <div class="row-actions">
+              <button class="primary" type="submit">Save gateway</button>
+              <button
+                v-if="gateway.enabled"
+                class="danger"
+                type="button"
+                @click="disableGateway"
+              >
+                Disable top-ups
+              </button>
+            </div>
+          </form>
         </template>
       </section>
 

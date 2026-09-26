@@ -22,6 +22,7 @@ import (
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/objectstore"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/payments"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/postgres"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/taxonomy"
 )
@@ -125,6 +126,15 @@ func run() error {
 		log.Printf("thresh-backend %s: S3_ENDPOINT_URL not set — asset endpoints disabled", version)
 	}
 
+	// Payment gateway (ticket 09, ADR 0004): server-side platform config,
+	// Stripe registered as the first provider (PayPal slots in behind the
+	// same Gateway seam). The webhook route verifies callbacks with the
+	// stored webhook secret.
+	gwRegistry := payments.NewRegistry()
+	gwRegistry.Register(payments.ProviderStripe, payments.NewStripe)
+	paymentsStore := postgres.NewPaymentsStore(pool)
+	paymentsSvc := payments.NewService(paymentsStore, paymentsStore.LoadConfig, gwRegistry.GatewayFor)
+
 	// Module registry (ticket 08): DB-only — no object storage dependency.
 	// Any active account may upload; the Platform Admin promotes. Built
 	// before the requests deps so ticket 13's attach endpoints can authorize
@@ -220,6 +230,10 @@ func run() error {
 		Earnings: &api.EarningsDeps{
 			Store:  postgres.NewCreditsStore(pool),
 			Roster: rosterStore,
+		},
+		Payments: &api.PaymentsDeps{
+			Service:       paymentsSvc,
+			PublicBaseURL: cfg.PublicBaseURL,
 		},
 	})
 	srv := &http.Server{

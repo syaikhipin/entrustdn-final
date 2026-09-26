@@ -5,6 +5,13 @@
 // categories, facet filtering, and the cached price from the current price
 // book. Requests (buying) arrive in later tickets.
 import { errFrom, fetchMyCredits, formatCredits, formatMicros, type CreditsView } from "~/credits";
+import {
+  fetchMyTopUps,
+  formatMinor,
+  initiateTopUp,
+  topUpStatusLabel,
+  type TopUp,
+} from "~/payments";
 import { formatBytes, formatDate } from "~/assets";
 import {
   downloadDelivery,
@@ -34,6 +41,16 @@ const collections = ref<Collection[]>([]);
 const collectionsError = ref<string | null>(null);
 const downloading = ref<string | null>(null);
 
+// Top-up state (ticket 09): the wallet refill. The preset amounts are cents;
+// settling happens at the gateway — after paying, the consumer returns and
+// refresh sees the settled top-up in their ledger.
+const topups = ref<TopUp[]>([]);
+const topupAmount = ref<number>(2500);
+const topupBusy = ref(false);
+const topupError = ref<string | null>(null);
+const topupNotice = ref<string | null>(null);
+const TOPUP_PRESETS = [1000, 2500, 5000, 10000];
+
 // Catalog state (ticket 06). Facet selection is one term per axis; the
 // consumer narrows the catalog client-side against the whole-catalog facet
 // counts.
@@ -49,6 +66,7 @@ onMounted(async () => {
     await load();
     await loadCatalog();
     await loadCollections();
+    await loadTopUps();
   }
 });
 
@@ -87,6 +105,40 @@ async function loadCollections() {
     collections.value = await listConsumerCollections(backendURL, token.value);
   } catch (e) {
     collectionsError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+// loadTopUps brings the consumer's top-up history — the wallet refill
+// attempts, newest first (ticket 09).
+async function loadTopUps() {
+  if (!token.value) return;
+  try {
+    topups.value = await fetchMyTopUps(backendURL, token.value);
+  } catch (e) {
+    topupError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+// startTopUp opens a payment session and sends the consumer to the
+// gateway's hosted page. Nothing is credited here — the signed callback
+// settles it, and refresh() shows the result on return.
+async function startTopUp() {
+  if (!token.value || topupBusy.value) return;
+  if (!Number.isInteger(topupAmount.value) || topupAmount.value <= 0) {
+    topupError.value = "Pick an amount in whole cents first.";
+    return;
+  }
+  topupBusy.value = true;
+  topupError.value = null;
+  topupNotice.value = null;
+  try {
+    const tu = await initiateTopUp(backendURL, token.value, topupAmount.value);
+    topupNotice.value = `Opening the payment page for ${formatMinor(tu.amountMinor, tu.currency)} — you'll come back here after paying.`;
+    window.location.href = tu.paymentURL;
+  } catch (e) {
+    topupError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    topupBusy.value = false;
   }
 }
 
@@ -208,6 +260,63 @@ function myDelta(mov: CreditsView["movements"][number]): number {
           taxonomy categories and the price the current book quotes. Requests
           (buying) arrive in the next slices.
         </p>
+      </section>
+
+      <!-- Top-up (ticket 09): the wallet refill -->
+      <section class="card">
+        <h3>Top up credits</h3>
+        <p class="hint">
+          Buy credits through the platform's payment gateway. Picking an
+          amount takes you to the hosted payment page — the credits land in
+          your balance once the payment settles.
+        </p>
+        <div class="topup-row">
+          <button
+            v-for="preset in TOPUP_PRESETS"
+            :key="preset"
+            class="secondary preset"
+            :class="{ picked: topupAmount === preset }"
+            type="button"
+            @click="topupAmount = preset"
+          >
+            €{{ preset / 100 }}
+          </button>
+          <label class="topup-custom">
+            or €
+            <input v-model.number="topupAmount" type="number" min="1" step="1" />
+          </label>
+          <button class="primary" type="button" :disabled="topupBusy" @click="startTopUp">
+            {{ topupBusy ? "Opening…" : "Top up" }}
+          </button>
+        </div>
+        <p v-if="topupError" class="error-text">{{ topupError }}</p>
+        <p v-if="topupNotice" class="ok-text">{{ topupNotice }}</p>
+        <template v-if="topups.length">
+          <h4>Your top-ups</h4>
+          <table class="ledger">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th class="num">Amount</th>
+                <th class="num">Credits</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="t in topups" :key="t.id">
+                <td>{{ new Date(t.createdAt).toLocaleString() }}</td>
+                <td class="num">{{ formatMinor(t.amountMinor, t.currency) }}</td>
+                <td class="num">{{ formatCredits(t.creditsMicros) }}</td>
+                <td>
+                  <span
+                    class="pill"
+                    :class="t.status === 'settled' ? 'ok' : t.status === 'pending' ? 'warn' : ''"
+                  >{{ topUpStatusLabel(t.status) }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
       </section>
 
       <!-- Catalog (ticket 06) -->
@@ -402,6 +511,20 @@ function myDelta(mov: CreditsView["movements"][number]): number {
   font-size: 2rem;
   font-weight: 700;
   margin: 0.5rem 0 1rem;
+}
+.topup-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+.preset.picked {
+  outline: 2px solid var(--accent, #2c6e49);
+  font-weight: 700;
+}
+.topup-custom input {
+  width: 7rem;
 }
 .ledger {
   width: 100%;

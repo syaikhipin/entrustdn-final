@@ -33,6 +33,7 @@ func openCleanTestDB(t *testing.T, url string) *pgxpool.Pool {
 		TRUNCATE data_collections, member_conversations, roster_members,
 		         modules, module_grants, data_requests,
 		         inference_charge_details,
+		         top_ups, payment_gateway_config,
 		         ledger_entries, ledger_movements, pricing_rules, pseudonym_maps,
 		         sessions, tos_acceptances, verification_tokens, tos_versions,
 		         taxonomy_terms, accounts CASCADE`)

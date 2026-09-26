@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -83,36 +84,9 @@ func (s *CreditsStore) PostMovement(ctx context.Context, mov credits.Movement) (
 		}
 	}
 
-	var movementID string
-	var createdAt = mov.CreatedAt
-	err = tx.QueryRow(ctx, `
-		INSERT INTO ledger_movements (kind, actor_id, request_id, memo)
-		VALUES ($1, NULLIF($2, '')::UUID, NULLIF($3, ''), $4)
-		RETURNING id, created_at`,
-		mov.Kind, mov.ActorID, mov.RequestID, mov.Memo).
-		Scan(&movementID, &createdAt)
+	movementID, createdAt, err := insertMovementTx(ctx, tx, mov)
 	if err != nil {
-		return credits.Movement{}, fmt.Errorf("insert movement: %w", err)
-	}
-	for _, e := range mov.Entries {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO ledger_entries (movement_id, scope, amount_micros, memo)
-			VALUES ($1, $2, $3, $4)`,
-			movementID, string(e.Scope), e.AmountMicros, e.Memo); err != nil {
-			return credits.Movement{}, fmt.Errorf("insert entry for %s: %w", e.Scope, err)
-		}
-	}
-	if mov.Inference != nil && mov.Kind == credits.KindInferenceCharge {
-		d := mov.Inference
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO inference_charge_details
-				(movement_id, model, input_tokens, cached_input_tokens, output_tokens,
-				 input_micros_per_1k, cached_input_micros_per_1k, output_micros_per_1k)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			movementID, d.Model, d.InputTokens, d.CachedInputTokens, d.OutputTokens,
-			d.InputMicrosPer1K, d.CachedInputMicrosPer1K, d.OutputMicrosPer1K); err != nil {
-			return credits.Movement{}, fmt.Errorf("insert inference charge details: %w", err)
-		}
+		return credits.Movement{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return credits.Movement{}, fmt.Errorf("commit movement: %w", err)
@@ -126,6 +100,47 @@ func (s *CreditsStore) PostMovement(ctx context.Context, mov credits.Movement) (
 		CreatedAt: createdAt,
 		Entries:   append([]credits.Entry(nil), mov.Entries...),
 	}, nil
+}
+
+// insertMovementTx writes one movement and its entries onto the given
+// transaction — the shared posting path for the credits store and the
+// payments store (whose settlement must claim the top-up and record the
+// movement in one transaction). The caller owns validation (balance,
+// overdraft); the credits store checks before calling, and the payments
+// store's top-ups only credit. Inference details ride along when present.
+func insertMovementTx(ctx context.Context, tx pgx.Tx, mov credits.Movement) (string, time.Time, error) {
+	var movementID string
+	var createdAt = mov.CreatedAt
+	err := tx.QueryRow(ctx, `
+		INSERT INTO ledger_movements (kind, actor_id, request_id, memo)
+		VALUES ($1, NULLIF($2, '')::UUID, NULLIF($3, ''), $4)
+		RETURNING id, created_at`,
+		mov.Kind, mov.ActorID, mov.RequestID, mov.Memo).
+		Scan(&movementID, &createdAt)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("insert movement: %w", err)
+	}
+	for _, e := range mov.Entries {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO ledger_entries (movement_id, scope, amount_micros, memo)
+			VALUES ($1, $2, $3, $4)`,
+			movementID, string(e.Scope), e.AmountMicros, e.Memo); err != nil {
+			return "", time.Time{}, fmt.Errorf("insert entry for %s: %w", e.Scope, err)
+		}
+	}
+	if mov.Inference != nil && mov.Kind == credits.KindInferenceCharge {
+		d := mov.Inference
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO inference_charge_details
+				(movement_id, model, input_tokens, cached_input_tokens, output_tokens,
+				 input_micros_per_1k, cached_input_micros_per_1k, output_micros_per_1k)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			movementID, d.Model, d.InputTokens, d.CachedInputTokens, d.OutputTokens,
+			d.InputMicrosPer1K, d.CachedInputMicrosPer1K, d.OutputMicrosPer1K); err != nil {
+			return "", time.Time{}, fmt.Errorf("insert inference charge details: %w", err)
+		}
+	}
+	return movementID, createdAt, nil
 }
 
 // Balance derives one scope's balance: the sum of its entries. Nothing is

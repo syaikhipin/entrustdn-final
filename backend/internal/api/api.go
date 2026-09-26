@@ -63,6 +63,9 @@ type Deps struct {
 	// name the earnings lines), the org earnings endpoints (ticket 15) do
 	// not register.
 	Earnings *EarningsDeps
+	// Payments is optional: when nil, the payment gateway endpoints
+	// (ticket 09) do not register.
+	Payments *PaymentsDeps
 }
 
 // Handler serves the backend API.
@@ -80,6 +83,7 @@ type Handler struct {
 	conversations *conversationsHandlers
 	collections   *collectionsHandlers
 	earnings      *earningsHandlers
+	payments      *paymentsHandlers
 	mux           *http.ServeMux
 }
 
@@ -155,6 +159,10 @@ func NewHandler(deps Deps) http.Handler {
 	// here once from the credits deps.
 	if deps.Earnings != nil && deps.Credits != nil && deps.Roster != nil {
 		h.registerEarningsRoutes(deps.Earnings, deps.Credits.Rules)
+	}
+
+	if deps.Payments != nil {
+		h.registerPaymentsRoutes(deps.Payments)
 	}
 
 	return withCORS(h.mux)
