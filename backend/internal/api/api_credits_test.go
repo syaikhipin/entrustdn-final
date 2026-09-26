@@ -308,13 +308,14 @@ func TestAdminPricingRulesGetAndSave(t *testing.T) {
 		t.Errorf("pricing document = %v", doc)
 	}
 
-	// Save a new price book: cache hits repriced.
+	// Save a new price book: cache hits repriced, revenue share percent set.
 	updated := map[string]any{
 		"inference": []any{map[string]any{
 			"model": "test-model", "input_micros_per_1k": 2_000,
 			"cached_input_micros_per_1k": 500, "output_micros_per_1k": 9_000,
 		}},
-		"data": map[string]any{"cached_asset_micros_per_unit": 4_000_000, "unique_micros_per_unit": 40_000_000},
+		"data":                      map[string]any{"cached_asset_micros_per_unit": 4_000_000, "unique_micros_per_unit": 40_000_000},
+		"revenue_share_org_percent": 65,
 	}
 	code, doc = postWithToken(t, srv, "/api/v1/admin/pricing", adminToken, updated)
 	if code != http.StatusOK {
@@ -328,6 +329,22 @@ func TestAdminPricingRulesGetAndSave(t *testing.T) {
 	saved := doc["inference"].([]any)[0].(map[string]any)
 	if saved["input_micros_per_1k"] != float64(2_000) || saved["cached_input_micros_per_1k"] != float64(500) {
 		t.Errorf("rules not saved: %v", doc)
+	}
+	if doc["revenue_share_org_percent"].(float64) != 65 {
+		t.Errorf("revenue share percent = %v, want 65", doc["revenue_share_org_percent"])
+	}
+
+	// An out-of-range revenue share percentage is refused too.
+	code, _ = postWithToken(t, srv, "/api/v1/admin/pricing", adminToken, map[string]any{
+		"inference": []any{map[string]any{
+			"model": "test-model", "input_micros_per_1k": 1,
+			"cached_input_micros_per_1k": 1, "output_micros_per_1k": 1,
+		}},
+		"data":                      map[string]any{"cached_asset_micros_per_unit": 1, "unique_micros_per_unit": 1},
+		"revenue_share_org_percent": 101,
+	})
+	if code != http.StatusBadRequest {
+		t.Errorf("invalid revenue share percent = %d, want 400", code)
 	}
 
 	// Invalid rule sets are refused: cached pricier than fresh.

@@ -59,6 +59,10 @@ type Deps struct {
 	Roster        *RosterDeps
 	Conversations *ConversationsDeps
 	Collections   *CollectionsDeps
+	// Earnings is optional: when nil (or when Roster is missing — members
+	// name the earnings lines), the org earnings endpoints (ticket 15) do
+	// not register.
+	Earnings *EarningsDeps
 }
 
 // Handler serves the backend API.
@@ -75,6 +79,7 @@ type Handler struct {
 	roster        *rosterHandlers
 	conversations *conversationsHandlers
 	collections   *collectionsHandlers
+	earnings      *earningsHandlers
 	mux           *http.ServeMux
 }
 
@@ -143,6 +148,13 @@ func NewHandler(deps Deps) http.Handler {
 
 	if deps.Collections != nil {
 		h.registerCollectionsRoutes(deps.Collections)
+	}
+
+	// The earnings view needs the Ledger and the roster (members name the
+	// lines); the split percentage rides the credits price book, resolved
+	// here once from the credits deps.
+	if deps.Earnings != nil && deps.Credits != nil && deps.Roster != nil {
+		h.registerEarningsRoutes(deps.Earnings, deps.Credits.Rules)
 	}
 
 	return withCORS(h.mux)

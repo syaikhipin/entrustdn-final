@@ -54,6 +54,10 @@ export interface PricingRules {
     cachedAssetMicrosPerUnit: number;
     uniqueMicrosPerUnit: number;
   };
+  // The Farmer Organization's share of the data premium (0–100). Absent
+  // when the price book predates ticket 15 — the backend's 80/20 default
+  // applies.
+  revenueShareOrgPercent?: number;
 }
 
 // --- Parsers ---
@@ -169,7 +173,18 @@ export function parsePricingRules(doc: unknown): PricingRules {
       cachedAssetMicrosPerUnit: dataRate("cached_asset_micros_per_unit"),
       uniqueMicrosPerUnit: dataRate("unique_micros_per_unit"),
     },
+    revenueShareOrgPercent: sharePercent(d.revenue_share_org_percent),
   };
+}
+
+// sharePercent reads the optional Revenue Share percentage: absent stays
+// absent (the backend's default applies), present must be an integer
+// 0–100.
+function sharePercent(v: unknown): number | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 100)
+    throw new Error(`pricing document revenue_share_org_percent is not an integer 0–100`);
+  return v;
 }
 
 // --- Formatting ---
@@ -289,6 +304,9 @@ export async function savePricing(backend: string, token: string, rules: Pricing
         cached_asset_micros_per_unit: rules.data.cachedAssetMicrosPerUnit,
         unique_micros_per_unit: rules.data.uniqueMicrosPerUnit,
       },
+      ...(rules.revenueShareOrgPercent !== undefined
+        ? { revenue_share_org_percent: rules.revenueShareOrgPercent }
+        : {}),
     }),
   });
 }

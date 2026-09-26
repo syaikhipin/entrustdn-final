@@ -123,10 +123,25 @@ func (r DataRules) Price(u DataUsage) int64 {
 }
 
 // PricingRules is the admin-configured price book: one rule per model, plus
-// the data rates. It is stored as a single JSON document (migration 0003).
+// the data rates and the Revenue Share split. It is stored as a single JSON
+// document (migration 0003).
 type PricingRules struct {
 	Inference []InferenceRule `json:"inference"`
 	Data      DataRules       `json:"data"`
+	// RevenueShareOrgPercent is the Farmer Organization's share of the data
+	// premium (ticket 15). nil rides the 80/20 default — price books from
+	// before ticket 15 need no migration. Admin-tunable through the pricing
+	// endpoints; validated to 0–100.
+	RevenueShareOrgPercent *int `json:"revenue_share_org_percent,omitempty"`
+}
+
+// OrgSharePercent returns the configured org share, or the default when the
+// price book predates ticket 15.
+func (p PricingRules) OrgSharePercent() int {
+	if p.RevenueShareOrgPercent != nil {
+		return *p.RevenueShareOrgPercent
+	}
+	return DefaultRevenueShareOrgPercent
 }
 
 // Validate refuses rule sets that would misprice: negative rates, cached
@@ -150,6 +165,9 @@ func (p PricingRules) Validate() error {
 	}
 	if p.Data.CachedAssetMicrosPerUnit < 0 || p.Data.UniqueMicrosPerUnit < 0 {
 		return fmt.Errorf("pricing: negative data rate")
+	}
+	if p.RevenueShareOrgPercent != nil && (*p.RevenueShareOrgPercent < 0 || *p.RevenueShareOrgPercent > 100) {
+		return fmt.Errorf("pricing: revenue share percent %d out of 0–100", *p.RevenueShareOrgPercent)
 	}
 	if p.Inference == nil && (p.Data.CachedAssetMicrosPerUnit == 0 && p.Data.UniqueMicrosPerUnit == 0) {
 		return fmt.Errorf("pricing: rule set is empty")

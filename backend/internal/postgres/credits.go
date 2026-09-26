@@ -227,6 +227,23 @@ func (s *CreditsStore) MovementsByScope(ctx context.Context, scope credits.Scope
 	return out, nil
 }
 
+// RevenueShareReceived sums the scope's positive entries across revenue_share
+// movements — one aggregate over the whole ledger, so an org's gross
+// receipts never truncate at a history-page boundary.
+func (s *CreditsStore) RevenueShareReceived(ctx context.Context, scope credits.Scope) (int64, error) {
+	var total int64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(e.amount_micros), 0)
+		FROM ledger_entries e
+		JOIN ledger_movements m ON m.id = e.movement_id
+		WHERE e.scope = $1 AND m.kind = 'revenue_share' AND e.amount_micros > 0`,
+		string(scope)).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("sum revenue share for %s: %w", scope, err)
+	}
+	return total, nil
+}
+
 // CreditRulesLoader reads the admin-configured price book: the `rules`
 // function the credits Service takes. An unconfigured or invalid price book
 // reads as ErrNoPricingRule — charges fail loudly instead of guessing.

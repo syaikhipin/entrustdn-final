@@ -282,7 +282,8 @@ func TestStorePricingRulesRoundTrip(t *testing.T) {
 			Model: "test-model", InputMicrosPer1K: 2_500,
 			CachedInputMicrosPer1K: 1_250, OutputMicrosPer1K: 10_000,
 		}},
-		Data: credits.DataRules{CachedAssetMicrosPerUnit: 5_000_000, UniqueMicrosPerUnit: 50_000_000},
+		Data:                   credits.DataRules{CachedAssetMicrosPerUnit: 5_000_000, UniqueMicrosPerUnit: 50_000_000},
+		RevenueShareOrgPercent: intPtr(75),
 	}
 	if err := postgres.SaveCreditRules(ctx, pool, want); err != nil {
 		t.Fatalf("SaveCreditRules: %v", err)
@@ -295,7 +296,8 @@ func TestStorePricingRulesRoundTrip(t *testing.T) {
 		got.Inference[0].InputMicrosPer1K != 2_500 ||
 		got.Inference[0].CachedInputMicrosPer1K != 1_250 ||
 		got.Inference[0].OutputMicrosPer1K != 10_000 ||
-		got.Data != want.Data {
+		got.Data != want.Data ||
+		got.RevenueShareOrgPercent == nil || *got.RevenueShareOrgPercent != 75 {
 		t.Errorf("round-tripped rules = %+v, want %+v", got, want)
 	}
 
@@ -305,4 +307,13 @@ func TestStorePricingRulesRoundTrip(t *testing.T) {
 	if err := postgres.SaveCreditRules(ctx, pool, bad); err == nil {
 		t.Error("SaveCreditRules accepted a price book with cached input pricier than fresh")
 	}
+	// An out-of-range Revenue Share percentage is refused too.
+	bad2 := want
+	bad2.Inference[0].CachedInputMicrosPer1K = 1_250
+	bad2.RevenueShareOrgPercent = intPtr(101)
+	if err := postgres.SaveCreditRules(ctx, pool, bad2); err == nil {
+		t.Error("SaveCreditRules accepted a revenue share percent over 100")
+	}
 }
+
+func intPtr(i int) *int { return &i }

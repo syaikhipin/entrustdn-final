@@ -117,6 +117,22 @@ async function loadPricing() {
   }
 }
 
+// The Revenue Share percent edits through a writable proxy so "unset"
+// (undefined — the backend's 80/20 default) renders as an empty input
+// rather than a misleading 80; typing a number makes it explicit. Writing
+// the empty string deletes the field, so the save carries no percentage.
+const orgPercentProxy = computed<number | "">({
+  get: () => pricing.value?.revenueShareOrgPercent ?? "",
+  set: (v) => {
+    if (!pricing.value) return;
+    if (v === "" || v === null || v === undefined) {
+      delete pricing.value.revenueShareOrgPercent;
+    } else {
+      pricing.value.revenueShareOrgPercent = Number(v);
+    }
+  },
+});
+
 async function decide(app: Application, decision: "approve" | "reject") {
   if (!token.value) return;
   busyId.value = app.id;
@@ -499,6 +515,22 @@ async function submitDeleteTerm(t: Term) {
             Unique data, micros per unit
             <input v-model.number="pricing.data.uniqueMicrosPerUnit" type="number" min="0" />
           </label>
+
+          <h4>Revenue share</h4>
+          <label>
+            Farmer Organization's share of the data premium, %
+            <input
+              v-model.number="orgPercentProxy"
+              type="number"
+              min="0"
+              max="100"
+            />
+          </label>
+          <p class="hint">
+            The rest is the platform's share. Left unset, the default 80/20
+            applies. Changing it affects future deliveries only.
+          </p>
+
           <button class="primary" type="button" @click="saveRules">Save price book</button>
         </template>
       </section>

@@ -111,6 +111,10 @@ func newCollectionsServer(t *testing.T) *collectionsFixture {
 			Rules: func(context.Context) (credits.PricingRules, error) { return deliveryRules(), nil },
 		},
 		Collections: &api.CollectionsDeps{Service: colSvc},
+		Earnings: &api.EarningsDeps{
+			Store:  ledger,
+			Roster: rosterStore,
+		},
 	}))
 	t.Cleanup(srv.Close)
 	return &collectionsFixture{

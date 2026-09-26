@@ -46,10 +46,10 @@ const participantKind = "collection_participant"
 
 // Deliver finalizes delivery: build the raw payload from accepted items,
 // force it through the cleaner, charge the consumer the unique-data rate,
-// and hand back the cleaned bytes. Unfinalized collections refuse
-// (ErrClosed); strangers read as ErrNotFound; a missing price book or an
-// overdrawn account refuses the delivery — surfaced, never silent, and
-// nothing uncleaned ever leaves.
+// split the premium as Revenue Share (ticket 15), and hand back the cleaned
+// bytes. Unfinalized collections refuse (ErrClosed); strangers read as
+// ErrNotFound; a missing price book or an overdrawn account refuses the
+// delivery — surfaced, never silent, and nothing uncleaned ever leaves.
 func (s *Service) Deliver(ctx context.Context, id, consumerID string) ([]byte, error) {
 	if s.credits == nil || s.cleaner == nil || s.pseudonyms == nil {
 		return nil, fmt.Errorf("collections: delivery is not wired (credits, cleaner, or pseudonyms missing)")
@@ -79,12 +79,51 @@ func (s *Service) Deliver(ctx context.Context, id, consumerID string) ([]byte, e
 		ActorID:   consumerID,
 		Memo:      "collection delivery",
 	}
-	if _, err := s.credits.ChargeData(ctx, credits.DataUsage{
+	mov, err := s.credits.ChargeData(ctx, credits.DataUsage{
 		Class: credits.DataUnique, Units: 1,
-	}, charge); err != nil {
+	}, charge)
+	if err != nil {
 		return nil, fmt.Errorf("collections: charge delivery: %w", err)
 	}
+	// Revenue Share (ticket 15): the premium just charged now splits —
+	// org + members earn their share of what the platform collected. The
+	// premium is the platform-side entry of the charge; the split rides the
+	// same request so the audit trail shows charge and split together.
+	premium := credits.PaidTo(mov, credits.Scope(credits.ScopePlatform))
+	participants := s.participants(c)
+	if _, err := s.credits.PostRevenueShare(ctx, credits.RevenueShare{
+		OrgScope:     credits.AccountScope(c.OrgID),
+		RequestID:    c.RequestID,
+		ActorID:      consumerID,
+		Memo:         "collection revenue share",
+		Participants: participants,
+	}, premium); err != nil {
+		return nil, fmt.Errorf("collections: post revenue share: %w", err)
+	}
 	return cleaned.Bytes(), nil
+}
+
+// participants derives the Revenue Share weights from the collection's
+// accepted items: each accepted answer is one unit of participation for its
+// member — the ticket's participation-weighted pro-rata. A member that
+// never contributed earns nothing and needs no resolution at all.
+func (s *Service) participants(c Collection) []credits.Participant {
+	weights := map[string]int64{}
+	var order []string
+	for _, it := range c.Items {
+		if it.Status != ItemAccepted {
+			continue
+		}
+		if _, seen := weights[it.MemberID]; !seen {
+			order = append(order, it.MemberID)
+		}
+		weights[it.MemberID]++
+	}
+	out := make([]credits.Participant, 0, len(order))
+	for _, id := range order {
+		out = append(out, credits.Participant{MemberID: id, Weight: weights[id]})
+	}
+	return out
 }
 
 // buildPayload renders the collection's accepted items as the raw CSV:

@@ -30,6 +30,8 @@ import {
   type Collection,
 } from "~/collections";
 import { fetchMyRequests, type DataRequest } from "~/requests";
+import { fetchMyEarnings, type EarningsView } from "~/earnings";
+import { formatCredits } from "~/credits";
 import {
   fetchTerms,
   setCategories,
@@ -91,6 +93,10 @@ const colDeadline = ref("");
 const colError = ref<string | null>(null);
 const syncing = ref<string | null>(null);
 
+// Earnings state (ticket 15): the org's Revenue Share — the split in
+// force, totals, and the per-Member breakdown.
+const earnings = ref<EarningsView | null>(null);
+
 onMounted(async () => {
   await restore();
   ready.value = true;
@@ -99,6 +105,7 @@ onMounted(async () => {
     await refreshPseudonyms();
     await refreshTerms();
     await refreshCollections();
+    await refreshEarnings();
   }
 });
 
@@ -168,6 +175,18 @@ async function refreshCollections() {
     collections.value = await listCollections(backendURL, token.value);
   } catch (e) {
     colError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+// refreshEarnings loads the Revenue Share view (ticket 15); a failure
+// surfaces as the page error, never as a blank section.
+async function refreshEarnings() {
+  if (!token.value) return;
+  try {
+    earnings.value = await fetchMyEarnings(backendURL, token.value);
+  } catch (e) {
+    earnings.value = null;
+    error.value = e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -756,6 +775,42 @@ async function openDownload(a: Asset) {
             </tr>
           </tbody>
         </table>
+      </section>
+
+      <!-- Earnings (ticket 15) -->
+      <section class="card">
+        <h3>Earnings</h3>
+        <p>
+          When a Consumer pays for a delivery, the premium splits as Revenue
+          Share — your organization's share lands on your account and flows
+          to members pro-rata by what they contributed. The platform keeps
+          the rest.
+        </p>
+        <template v-if="earnings">
+          <p class="earnings-summary">
+            <strong>{{ formatCredits(earnings.totalReceivedMicros) }}</strong>
+            received so far at a
+            <strong>{{ earnings.revenueShareOrgPercent }}%</strong> share ·
+            account balance
+            <strong>{{ formatCredits(earnings.balanceMicros) }}</strong>
+          </p>
+          <p v-if="earnings.members.length === 0" class="hint">No members on the roster yet.</p>
+          <table v-else class="assets">
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Earned</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in earnings.members" :key="m.memberId">
+                <td>{{ m.displayName }}</td>
+                <td>{{ formatCredits(m.earnedMicros) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+        <p v-else class="hint">Earnings are loading…</p>
       </section>
 
       <!-- Pseudonym map (ticket 05) -->

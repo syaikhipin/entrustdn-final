@@ -44,6 +44,10 @@ type deliveryFixture struct {
 	credits *credits.Service
 	ledger  *credits.MemoryStore
 	cleaner *recordingCleaner
+	// rules is the live price book the credits service reads — tests tune
+	// it (e.g. the revenue-share percentage) before delivering. A pointer
+	// so a mutation after fixture setup is visible to the service.
+	rules *credits.PricingRules
 }
 
 func deliveryFixtureFor(t *testing.T) deliveryFixture {
@@ -68,17 +72,20 @@ func deliveryFixtureFor(t *testing.T) deliveryFixture {
 	}
 
 	ledger := credits.NewMemoryStore()
+	rules := testRules()
+	f := deliveryFixture{svc: svc, ledger: ledger, rules: &rules}
 	credSvc := credits.NewService(ledger, func(context.Context) (credits.PricingRules, error) {
-		return testRules(), nil
+		return *f.rules, nil
 	})
 	// Fund the consumer so the charge can land.
 	if _, err := credSvc.Grant(t.Context(), credits.AccountScope("consumer-1"), 100*credits.MicrosPerCredit, "admin", "pilot seed"); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	pmap := anonymize.NewMemoryMap()
-	cleaner := &recordingCleaner{inner: anonymize.NewDelivery(pmap)}
-	svc.WithCredits(credSvc).WithCleaner(cleaner).WithPseudonyms(pmap)
-	return deliveryFixture{svc: svc, credits: credSvc, ledger: ledger, cleaner: cleaner}
+	f.cleaner = &recordingCleaner{inner: anonymize.NewDelivery(pmap)}
+	f.credits = credSvc
+	svc.WithCredits(credSvc).WithCleaner(f.cleaner).WithPseudonyms(pmap)
+	return f
 }
 
 func TestDeliveryCarriesPseudonymsNeverIdentities(t *testing.T) {
@@ -177,6 +184,130 @@ func testRules() credits.PricingRules {
 		Data: credits.DataRules{CachedAssetMicrosPerUnit: 5_000_000, UniqueMicrosPerUnit: 50_000_000},
 	}
 }
+
+// Revenue Share (ticket 15): a delivered collection's premium splits — the
+// org and platform receive their postings, contributing members earn
+// pro-rata shares. The split fires inside Deliver, right after the charge.
+
+func TestDeliverPostsRevenueShare(t *testing.T) {
+	f := deliveryFixtureFor(t)
+	c := mustCollectionID(t, f.svc)
+
+	if _, err := f.svc.Deliver(t.Context(), c, "consumer-1"); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+
+	// Premium 50 cr at the default 80/20: the org account receives 40 cr
+	// and passes the whole share to its sole contributing member, netting
+	// zero; the platform keeps 10 cr.
+	org, err := f.ledger.Balance(t.Context(), credits.AccountScope("org-1"))
+	if err != nil {
+		t.Fatalf("org balance: %v", err)
+	}
+	if org != 0 {
+		t.Errorf("org net balance = %d, want 0 (received 40 cr, distributed 40 cr to mem-1)", org)
+	}
+	plat, err := f.ledger.Balance(t.Context(), credits.Scope(credits.ScopePlatform))
+	if err != nil {
+		t.Fatalf("platform balance: %v", err)
+	}
+	if plat != 10_000_000 {
+		t.Errorf("platform balance = %d, want 10_000_000 (80/20 of 50 cr)", plat)
+	}
+	mem1, err := f.ledger.Balance(t.Context(), credits.MemberScope("mem-1"))
+	if err != nil {
+		t.Fatalf("member balance: %v", err)
+	}
+	if mem1 != 40_000_000 {
+		t.Errorf("mem-1 balance = %d, want 40_000_000 (sole contributor)", mem1)
+	}
+	if mem2, _ := f.ledger.Balance(t.Context(), credits.MemberScope("mem-2")); mem2 != 0 {
+		t.Errorf("mem-2 balance = %d, want 0 (never answered)", mem2)
+	}
+
+	// The postings ride one revenue_share movement tied to the request.
+	movs, err := f.ledger.MovementsByScope(t.Context(), credits.AccountScope("org-1"), 10)
+	if err != nil {
+		t.Fatalf("movements: %v", err)
+	}
+	kindRevenueShare := false
+	for _, m := range movs {
+		if m.Kind == credits.KindRevenueShare && m.RequestID == "req-1" {
+			kindRevenueShare = true
+		}
+	}
+	if !kindRevenueShare {
+		t.Errorf("no revenue_share movement for req-1 under the org scope: %+v", movs)
+	}
+}
+
+func TestDeliverRevenueShareRespectsTunedPercentage(t *testing.T) {
+	f := deliveryFixtureFor(t)
+	// The admin tunes the split to 50/50 before the delivery.
+	fifty := 50
+	f.rules.RevenueShareOrgPercent = &fifty
+	c := mustCollectionID(t, f.svc)
+
+	if _, err := f.svc.Deliver(t.Context(), c, "consumer-1"); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	// At 50/50 the sole contributor takes the whole org share, netting the
+	// org account zero; the platform keeps its 25 cr.
+	org, _ := f.ledger.Balance(t.Context(), credits.AccountScope("org-1"))
+	plat, _ := f.ledger.Balance(t.Context(), credits.Scope(credits.ScopePlatform))
+	if org != 0 || plat != 25_000_000 {
+		t.Errorf("balances = (org %d, platform %d), want (0, 25 cr) at 50/50", org, plat)
+	}
+}
+
+func TestDeliverRevenueShareWeightsByParticipation(t *testing.T) {
+	// mem-1 accepted two questions while mem-2 accepted one (the second
+	// stayed unanswered and the collection finalized incomplete on its
+	// deadline): weights 2:1, so the 40 cr org share splits
+	// 26_666_666/13_333_333, and the largest-remainder micro goes to mem-1.
+	svc, _, convs, _ := fixtureShared(t)
+	past := fixedNow.Add(-time.Hour)
+	c, err := svc.Create(t.Context(), "org-1", collections.NewCollection{
+		RequestID: "req-1", MemberIDs: []string{"mem-1", "mem-2"},
+		Questions: []string{farmQ, cropQ}, Deadline: &past,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	seedConversation(t, convs, "conv-1", "mem-1", "Siobhán Ní Uaithne",
+		[]string{farmQ, cropQ}, []string{"42 hectares", "barley"}, conversations.StatusCompleted)
+	// mem-2 answers only the first question: weights land at 2:1.
+	seedConversation(t, convs, "conv-2", "mem-2", "Pádraig Ó Briain",
+		[]string{farmQ, cropQ}, []string{"18 hectares"}, conversations.StatusCompleted)
+	got, err := svc.Sync(t.Context(), c.ID, "org-1")
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if got.Status != collections.StatusIncomplete {
+		t.Fatalf("Sync = %s, want incomplete (mem-2's second answer missing)", got.Status)
+	}
+
+	ledger := credits.NewMemoryStore()
+	credSvc := credits.NewService(ledger, func(context.Context) (credits.PricingRules, error) {
+		return testRules(), nil
+	})
+	if _, err := credSvc.Grant(t.Context(), credits.AccountScope("consumer-1"), 100*credits.MicrosPerCredit, "admin", "pilot seed"); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	pmap := anonymize.NewMemoryMap()
+	svc.WithCredits(credSvc).WithCleaner(&recordingCleaner{inner: anonymize.NewDelivery(pmap)}).WithPseudonyms(pmap)
+
+	if _, err := svc.Deliver(t.Context(), c.ID, "consumer-1"); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	m1, _ := ledger.Balance(t.Context(), credits.MemberScope("mem-1"))
+	m2, _ := ledger.Balance(t.Context(), credits.MemberScope("mem-2"))
+	if m1 != 26_666_667 || m2 != 13_333_333 {
+		t.Errorf("member balances = (%d, %d), want (26_666_667, 13_333_333) at weights 2:1", m1, m2)
+	}
+}
+
+func intPtr(i int) *int { return &i }
 
 // mustCollectionID loads the fixture's collection ID.
 func mustCollectionID(t *testing.T, svc *collections.Service) string {

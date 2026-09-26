@@ -112,6 +112,10 @@ type Store interface {
 	Balances(ctx context.Context) (map[Scope]int64, error)
 	// MovementsByScope returns a scope's movements, newest first.
 	MovementsByScope(ctx context.Context, scope Scope, limit int) ([]Movement, error)
+	// RevenueShareReceived sums the scope's positive entries across
+	// revenue_share movements — an organization's gross receipts, derived
+	// from the whole ledger, never truncated by a history window.
+	RevenueShareReceived(ctx context.Context, scope Scope) (int64, error)
 }
 
 // Compile-time check that MemoryStore satisfies Store.
@@ -227,6 +231,27 @@ func (m *MemoryStore) MovementsByScope(_ context.Context, scope Scope, limit int
 		}
 	}
 	return out, nil
+}
+
+// RevenueShareReceived sums the scope's positive entries across revenue_share
+// movements — the org's gross receipts, before any member distribution. The
+// distribution back out to members rides separate entries and must not
+// shrink the total.
+func (m *MemoryStore) RevenueShareReceived(_ context.Context, scope Scope) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var total int64
+	for _, mov := range m.movements {
+		if mov.Kind != KindRevenueShare {
+			continue
+		}
+		for _, e := range mov.Entries {
+			if e.Scope == scope && e.AmountMicros > 0 {
+				total += e.AmountMicros
+			}
+		}
+	}
+	return total, nil
 }
 
 func isSystemScope(s Scope) bool {

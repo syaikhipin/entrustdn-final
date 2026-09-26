@@ -26,6 +26,8 @@ var fixedNow = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 
 const farmQ = "What is your farm size?"
 
+const cropQ = "Which crops did you sow?"
+
 // fakeOpener records re-ask conversation opens.
 type fakeOpener struct {
 	starts []conversations.Start

@@ -217,6 +217,10 @@ func run() error {
 			PublicBaseURL: cfg.PublicBaseURL,
 		},
 		Collections: &api.CollectionsDeps{Service: colSvc},
+		Earnings: &api.EarningsDeps{
+			Store:  postgres.NewCreditsStore(pool),
+			Roster: rosterStore,
+		},
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,
