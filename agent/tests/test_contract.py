@@ -91,6 +91,10 @@ class TestClarifyPair:
         assert req.history[0].role == "consumer"
         assert req.catalog[0].id == "asset-01"
         assert req.catalog[0].cached_price_micros == 5_000_000
+        # Ticket 13: the fixture now carries an attached Agent Skill.
+        assert len(req.skills) == 1
+        assert req.skills[0].name == "Teagasc barley conventions"
+        assert "t/ha" in req.skills[0].content
 
     def test_response_round_trip(self) -> None:
         doc = load_fixture("request-clarify-response.json")

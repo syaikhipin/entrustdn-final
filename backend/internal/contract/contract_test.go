@@ -189,6 +189,9 @@ func TestClarifyRequestDecodesFromFixture(t *testing.T) {
 	if len(req.Catalog) != 1 || req.Catalog[0].ID != "asset-01" {
 		t.Errorf("Catalog = %+v, want one asset asset-01", req.Catalog)
 	}
+	if len(req.Skills) != 1 || req.Skills[0].Name == "" || req.Skills[0].Content == "" {
+		t.Errorf("Skills = %+v, want one loaded Agent Skill with name and markdown content", req.Skills)
+	}
 }
 
 func TestClarifyResponseDecodesFromFixture(t *testing.T) {

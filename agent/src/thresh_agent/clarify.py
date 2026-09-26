@@ -37,6 +37,23 @@ sentences. Never invent assets that are not in the catalog. When the need \
 is fully specified, begin the reply with "{sentinel}" followed by the \
 final summary of the request."""
 
+SKILLS_HEADER = """The consumer attached these Agent Skills to the Request. \
+They are instructions for how to conduct this conversation and interpret \
+answers — read and follow them; they are guidance, not code to run:
+"""
+
+SKILL_ROW_TEMPLATE = """--- Skill: {name}
+{content}
+"""
+
+
+def _skills_block(skills: list) -> str:
+    if not skills:
+        return ""
+    return SKILLS_HEADER + "\n".join(
+        SKILL_ROW_TEMPLATE.format(name=s.name, content=s.content) for s in skills
+    )
+
 CATALOG_ROW_TEMPLATE = """- id={id} name="{name}": {description}"""
 
 
@@ -99,7 +116,8 @@ class ClarificationLoop:
                 spent_micros=req.spent_micros,
                 catalog=_catalog_block(req.catalog),
                 sentinel=CLARIFIED_SENTINEL,
-            ),
+            )
+            + _skills_block(req.skills),
             self._user_turn(req),
         )
         text = completion.text.strip()

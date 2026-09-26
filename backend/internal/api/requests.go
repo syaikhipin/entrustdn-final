@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/requests"
 )
 
@@ -19,10 +20,13 @@ import (
 // RequestsDeps carries the collaborators the request endpoints need.
 // Catalog hands the agent the live catalog snapshot each turn (the
 // assets-service catalog, mapped to contract shapes); it is a func so tests
-// can stub the inventory.
+// can stub the inventory. Modules is the registry front door — nil when the
+// module routes are unconfigured, in which case template/skill attachment
+// is refused.
 type RequestsDeps struct {
 	Store   requests.Store
 	Catalog requests.CatalogSource
+	Modules *modules.Service
 }
 
 // registerRequestsRoutes wires the request endpoints when configured.
@@ -41,16 +45,27 @@ func (h *Handler) registerRequestsRoutes(deps *RequestsDeps) {
 	credSvc := credits.NewService(h.credits.deps.Store, h.credits.deps.Rules)
 	// ac already satisfies requests.Clarifier structurally — the backend
 	// speaks to the agent only through the contract, no adapter needed.
-	h.requests = &requestsHandlers{svc: requests.NewService(deps.Store, ac, deps.Catalog, credSvc)}
+	h.requests = &requestsHandlers{svc: requests.NewService(deps.Store, ac, deps.Catalog, credSvc), mods: deps.Modules}
+	if deps.Modules != nil {
+		// Ticket 13: the registry authorizes every template/skill attach —
+		// private modules reach only their author and grantees.
+		requests.SetModuleSource(h.requests.svc, deps.Modules)
+	}
 	h.mux.HandleFunc("POST /api/v1/requests", h.handleCreateRequest)
 	h.mux.HandleFunc("GET /api/v1/requests", h.handleListRequests)
 	h.mux.HandleFunc("GET /api/v1/requests/{id}", h.handleGetRequest)
 	h.mux.HandleFunc("POST /api/v1/requests/{id}/chat", h.handleRequestChat)
+	h.mux.HandleFunc("PUT /api/v1/requests/{id}/template", h.handleAttachTemplate)
+	h.mux.HandleFunc("DELETE /api/v1/requests/{id}/template", h.handleDetachTemplate)
+	h.mux.HandleFunc("POST /api/v1/requests/{id}/skills", h.handleAttachSkill)
+	h.mux.HandleFunc("DELETE /api/v1/requests/{id}/skills/{module_id}", h.handleDetachSkill)
 }
 
 // requestsHandlers holds the resolved collaborators for the request routes.
+// mods is nil when the module routes are unconfigured.
 type requestsHandlers struct {
-	svc *requests.Service
+	svc  *requests.Service
+	mods *modules.Service
 }
 
 // requestJSON renders one Request for the HTTP boundary: the commission,
@@ -73,7 +88,7 @@ func requestJSON(r requests.Request) map[string]any {
 			"reported_at": m.ReportedAt.Format(timeFormat),
 		})
 	}
-	return map[string]any{
+	doc := map[string]any{
 		"id":            r.ID,
 		"description":   r.Description,
 		"format":        r.Format,
@@ -83,9 +98,16 @@ func requestJSON(r requests.Request) map[string]any {
 		"status":        string(r.Status),
 		"messages":      msgs,
 		"matches":       matches,
+		"skills":        r.Skills,
 		"created_at":    r.CreatedAt.Format(timeFormat),
 		"updated_at":    r.UpdatedAt.Format(timeFormat),
 	}
+	if r.Template != nil {
+		// The attachment's identity rides; the parsed spec stays internal —
+		// the collection carries the snapshot that actually runs.
+		doc["template"] = map[string]any{"module_id": r.Template.ModuleID}
+	}
+	return doc
 }
 
 type createRequestRequest struct {
@@ -194,5 +216,131 @@ func (h *Handler) handleRequestChat(w http.ResponseWriter, r *http.Request) {
 			"clarified":      turn.Reply.Clarified,
 			"charged_micros": turn.ChargedMicros,
 		})
+	}
+}
+
+type attachTemplateRequest struct {
+	ModuleID string `json:"module_id"`
+}
+
+// handleAttachTemplate pins a Process Template onto the Request (ticket
+// 13): its questions, follow-up rules, and triggers drive the collection
+// conversation instead of the defaults. The registry authorizes first — a
+// private module reaches only its author and grantees, and a stranger's
+// refusal reads as 404 so existence is not disclosed. Attach only while the
+// request is still clarifying.
+func (h *Handler) handleAttachTemplate(w http.ResponseWriter, r *http.Request) {
+	consumer, ok := h.requireConsumer(w, r)
+	if !ok {
+		return
+	}
+	var req attachTemplateRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	if h.requests.mods == nil {
+		// No registry configured: nothing may attach (surfaced, never a
+		// nil-registry panic).
+		apiError(w, http.StatusNotFound, "no such request or module")
+		return
+	}
+	// The registry parses and authorizes in one step. Kinds of failure map
+	// separately: a stranger's module reads as 404 so existence is not
+	// disclosed; an unusable config or wrong kind is the caller's fault
+	// (422, message from the registry); a store failure is 5xx with the
+	// internals kept back.
+	spec, terr := h.requests.mods.Template(r.Context(), consumer.ID, req.ModuleID)
+	if terr != nil {
+		switch {
+		case errors.Is(terr, modules.ErrNotFound), errors.Is(terr, modules.ErrForbidden):
+			apiError(w, http.StatusNotFound, "no such request or module")
+		case errors.Is(terr, modules.ErrUnusableTemplate):
+			apiError(w, http.StatusUnprocessableEntity, terr.Error())
+		default:
+			apiError(w, http.StatusInternalServerError, "failed to load the template")
+		}
+		return
+	}
+	updated, err := h.requests.svc.AttachTemplate(r.Context(), r.PathValue("id"), consumer.ID, req.ModuleID, spec)
+	switch {
+	case errors.Is(err, requests.ErrNotFound), errors.Is(err, requests.ErrForbidden):
+		apiError(w, http.StatusNotFound, "no such request or module")
+	case errors.Is(err, requests.ErrClosed):
+		apiError(w, http.StatusConflict, "this request is no longer open for clarification")
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "failed to attach the template")
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"request": requestJSON(updated)})
+	}
+}
+
+// handleDetachTemplate removes the attached template; the request falls
+// back to caller-supplied questions at collection time.
+func (h *Handler) handleDetachTemplate(w http.ResponseWriter, r *http.Request) {
+	consumer, ok := h.requireConsumer(w, r)
+	if !ok {
+		return
+	}
+	updated, err := h.requests.svc.DetachTemplate(r.Context(), r.PathValue("id"), consumer.ID)
+	switch {
+	case errors.Is(err, requests.ErrNotFound), errors.Is(err, requests.ErrForbidden):
+		apiError(w, http.StatusNotFound, "no such request")
+	case errors.Is(err, requests.ErrClosed):
+		apiError(w, http.StatusConflict, "this request is no longer open for clarification")
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "failed to detach the template")
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"request": requestJSON(updated)})
+	}
+}
+
+type attachSkillRequest struct {
+	ModuleID string `json:"module_id"`
+}
+
+// handleAttachSkill adds an Agent Skill to the request's context set
+// (ticket 13): its markdown loads into the agent's context on every clarify
+// turn. Idempotent; capped; authorized through the registry like templates.
+func (h *Handler) handleAttachSkill(w http.ResponseWriter, r *http.Request) {
+	consumer, ok := h.requireConsumer(w, r)
+	if !ok {
+		return
+	}
+	var req attachSkillRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	updated, err := h.requests.svc.AttachSkill(r.Context(), r.PathValue("id"), consumer.ID, req.ModuleID)
+	switch {
+	case errors.Is(err, requests.ErrNotFound), errors.Is(err, requests.ErrForbidden):
+		apiError(w, http.StatusNotFound, "no such request or module")
+	case errors.Is(err, requests.ErrClosed):
+		apiError(w, http.StatusConflict, "this request is no longer open for clarification")
+	case errors.Is(err, requests.ErrTooManySkills):
+		apiError(w, http.StatusUnprocessableEntity, err.Error())
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "failed to attach the skill")
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"request": requestJSON(updated)})
+	}
+}
+
+// handleDetachSkill removes one skill from the request's set; detaching a
+// skill that is not attached is not an error.
+func (h *Handler) handleDetachSkill(w http.ResponseWriter, r *http.Request) {
+	consumer, ok := h.requireConsumer(w, r)
+	if !ok {
+		return
+	}
+	updated, err := h.requests.svc.DetachSkill(r.Context(), r.PathValue("id"), consumer.ID, r.PathValue("module_id"))
+	switch {
+	case errors.Is(err, requests.ErrNotFound), errors.Is(err, requests.ErrForbidden):
+		apiError(w, http.StatusNotFound, "no such request")
+	case errors.Is(err, requests.ErrClosed):
+		apiError(w, http.StatusConflict, "this request is no longer open for clarification")
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "failed to detach the skill")
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"request": requestJSON(updated)})
 	}
 }

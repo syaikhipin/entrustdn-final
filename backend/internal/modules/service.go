@@ -147,6 +147,51 @@ func (s *Service) canView(ctx context.Context, latest Module, callerID string) b
 	return granted
 }
 
+// Skill loads an Agent Skill's content for a caller the registry has
+// authorized — the consumption seam's read half (ticket 13). The latest
+// version's markdown is what rides the wire; the kind must actually be an
+// agent skill.
+func (s *Service) Skill(ctx context.Context, callerID, moduleID string) (SkillContent, error) {
+	latest, err := s.requireVisible(ctx, callerID, moduleID)
+	if err != nil {
+		return SkillContent{}, err
+	}
+	if latest.Kind != KindAgentSkill {
+		return SkillContent{}, fmt.Errorf("modules: %s is a %s, not an agent skill", moduleID, latest.Kind)
+	}
+	return SkillContent{ModuleID: latest.ModuleID, Name: latest.Name, Content: latest.Content}, nil
+}
+
+// Accessible reports whether callerID may *use* a Module — its author, a
+// granted account, or anyone at all once system-wide. Ticket 13's
+// consumption seam: the request endpoints gate template/skill attachment
+// through this, so a private Module only ever drives collections for its
+// author and grantees.
+func (s *Service) Accessible(ctx context.Context, callerID, moduleID string) error {
+	_, err := s.requireVisible(ctx, callerID, moduleID)
+	return err
+}
+
+// Template loads a Process Template's parsed spec for a caller the registry
+// has authorized — the consumption seam's template half (ticket 13). The
+// latest version's config is parsed strictly; a module whose kind is not a
+// process template, or whose config does not parse as one, is refused, so
+// an unusable template can never reach a Request.
+func (s *Service) Template(ctx context.Context, callerID, moduleID string) (TemplateSpec, error) {
+	latest, err := s.requireVisible(ctx, callerID, moduleID)
+	if err != nil {
+		return TemplateSpec{}, err
+	}
+	if latest.Kind != KindProcessTemplate {
+		return TemplateSpec{}, fmt.Errorf("%w: %s is a %s, not a process template", ErrUnusableTemplate, moduleID, latest.Kind)
+	}
+	spec, err := ParseTemplateSpec([]byte(latest.Config))
+	if err != nil {
+		return TemplateSpec{}, err
+	}
+	return spec, nil
+}
+
 // requireVisible loads the Module and refuses callers who may not see it.
 func (s *Service) requireVisible(ctx context.Context, callerID, moduleID string) (Module, error) {
 	latest, err := s.store.LatestModuleVersion(ctx, moduleID)

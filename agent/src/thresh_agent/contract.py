@@ -83,6 +83,17 @@ class HistoryTurn(BaseModel):
     body: str = Field(min_length=1)
 
 
+class SkillModule(BaseModel):
+    """One Agent Skill loaded into the agent's context for this turn
+    (ticket 13): the skill's name and its markdown instructions.
+    Instructions are data the agent reads, never code it runs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+
+
 class ClarifyRequest(BaseModel):
     """One clarification turn sent backend→agent."""
 
@@ -97,6 +108,7 @@ class ClarifyRequest(BaseModel):
     message: str = Field(min_length=1)
     history: list[HistoryTurn] = Field(default_factory=list)
     catalog: list[CatalogAsset] = Field(default_factory=list)
+    skills: list[SkillModule] = Field(default_factory=list)
 
 
 class CatalogMatch(BaseModel):

@@ -7,6 +7,10 @@ import {
   chatTurn,
   parseRequest,
   createRequest,
+  attachTemplate,
+  attachSkill,
+  detachTemplate,
+  detachSkill,
 } from "./requests";
 
 // A /api/v1/requests document exactly as the Go backend serializes it:
@@ -31,6 +35,8 @@ const requestDoc = {
       reported_at: "2026-09-23T10:00:01Z",
     },
   ],
+  skills: ["mod-skill-1"],
+  template: { module_id: "mod-tpl-1" },
   created_at: "2026-09-23T09:59:00Z",
   updated_at: "2026-09-23T10:00:01Z",
 };
@@ -53,6 +59,15 @@ describe("parseRequest", () => {
       reason: "catalog asset tagged spring barley",
       reportedAt: "2026-09-23T10:00:01Z",
     });
+    // Ticket 13: module attachments ride the document.
+    expect(r.template).toEqual({ moduleId: "mod-tpl-1" });
+    expect(r.skills).toEqual(["mod-skill-1"]);
+  });
+
+  it("parses a request with no attachments", () => {
+    const r = parseRequest({ ...requestDoc, template: null, skills: [] });
+    expect(r.template).toBeNull();
+    expect(r.skills).toEqual([]);
   });
 
   it("accepts every documented status", () => {
@@ -145,6 +160,73 @@ describe("createRequest", () => {
         budget_micros: 10_000_000,
       });
       expect(got.id).toBe("abc123");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe("attachTemplate", () => {
+  it("PUTs the module id and parses the updated request", async () => {
+    const calls: Array<{ path: string; init: RequestInit }> = [];
+    const fetchMock = (async (input: string | URL, init?: RequestInit) => {
+      calls.push({ path: String(input), init: init ?? {} });
+      return new Response(JSON.stringify({ request: requestDoc }), { status: 200 });
+    }) as typeof fetch;
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    try {
+      const got = await attachTemplate("http://backend.test", "tok", "abc123", "mod-tpl-1");
+      expect(calls).toHaveLength(1);
+      const call = calls[0]!;
+      expect(call.path).toBe("http://backend.test/api/v1/requests/abc123/template");
+      expect(call.init.method).toBe("PUT");
+      expect(JSON.parse(String(call.init.body))).toEqual({ module_id: "mod-tpl-1" });
+      expect(got.template).toEqual({ moduleId: "mod-tpl-1" });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe("attachSkill", () => {
+  it("POSTs the module id to the skills collection", async () => {
+    const calls: Array<{ path: string; init: RequestInit }> = [];
+    const fetchMock = (async (input: string | URL, init?: RequestInit) => {
+      calls.push({ path: String(input), init: init ?? {} });
+      return new Response(JSON.stringify({ request: requestDoc }), { status: 200 });
+    }) as typeof fetch;
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    try {
+      const got = await attachSkill("http://backend.test", "tok", "abc123", "mod-skill-9");
+      const call = calls[0]!;
+      expect(call.path).toBe("http://backend.test/api/v1/requests/abc123/skills");
+      expect(call.init.method).toBe("POST");
+      expect(JSON.parse(String(call.init.body))).toEqual({ module_id: "mod-skill-9" });
+      expect(got.skills).toEqual(["mod-skill-1"]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe("detachTemplate / detachSkill", () => {
+  it("DELETEs without a body and parses the request", async () => {
+    const calls: Array<{ path: string; init: RequestInit }> = [];
+    const fetchMock = (async (input: string | URL, init?: RequestInit) => {
+      calls.push({ path: String(input), init: init ?? {} });
+      return new Response(JSON.stringify({ request: requestDoc }), { status: 200 });
+    }) as typeof fetch;
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    try {
+      await detachTemplate("http://backend.test", "tok", "abc123");
+      await detachSkill("http://backend.test", "tok", "abc123", "mod-skill-1");
+      expect(calls[0]!.path).toBe("http://backend.test/api/v1/requests/abc123/template");
+      expect(calls[0]!.init.method).toBe("DELETE");
+      expect(calls[1]!.path).toBe("http://backend.test/api/v1/requests/abc123/skills/mod-skill-1");
+      expect(calls[1]!.init.method).toBe("DELETE");
     } finally {
       globalThis.fetch = original;
     }

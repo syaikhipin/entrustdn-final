@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/postgres"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/requests"
 )
@@ -139,5 +140,60 @@ func TestRequestsStoreNotFoundAndList(t *testing.T) {
 	}
 	if err := store.UpdateRequest(ctx, requests.Request{ID: "ghost"}); !errors.Is(err, requests.ErrNotFound) {
 		t.Errorf("update of a ghost = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRequestsStoreRoundTripsTemplateAndSkills(t *testing.T) {
+	// Ticket 13: the module attachments ride the record — the template's
+	// parsed spec as a snapshot, the skills as module ids. NULL template is
+	// the default flow and must come back as nil, not an empty spec.
+	store, _, ctx, consumerID := requestsFixture(t)
+
+	r := storedRequest(consumerID)
+	maxReasks := 1
+	r.Template = &requests.TemplateAttachment{
+		ModuleID: "mod-tpl-1",
+		Spec: modules.TemplateSpec{
+			Questions: []string{"Which county is your farm in?"},
+			FollowUp:  modules.FollowUpRules{MaxReasks: &maxReasks, Topic: "A quick follow-up"},
+			Triggers: []modules.TriggerRule{
+				{Type: modules.RuleRequireAny, Values: []string{"carlow", "kilkenny"}},
+			},
+		},
+	}
+	r.Skills = []string{"mod-skill-1", "mod-skill-2"}
+	if err := store.CreateRequest(ctx, &r); err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	got, err := store.RequestByID(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("RequestByID: %v", err)
+	}
+	if got.Template == nil || got.Template.ModuleID != "mod-tpl-1" {
+		t.Fatalf("template = %+v, want the mod-tpl-1 snapshot", got.Template)
+	}
+	if len(got.Template.Spec.Questions) != 1 || got.Template.Spec.Questions[0] != "Which county is your farm in?" {
+		t.Errorf("spec questions = %+v, want the snapshot's question", got.Template.Spec.Questions)
+	}
+	if got.Template.Spec.FollowUp.MaxReasks == nil || *got.Template.Spec.FollowUp.MaxReasks != 1 {
+		t.Errorf("follow_up = %+v, want max_reasks 1", got.Template.Spec.FollowUp)
+	}
+	if len(got.Skills) != 2 || got.Skills[0] != "mod-skill-1" {
+		t.Errorf("skills = %v, want both module ids in order", got.Skills)
+	}
+
+	// Detach (nil + empty) survives the whole-record rewrite.
+	got.Template = nil
+	got.Skills = nil
+	if err := store.UpdateRequest(ctx, got); err != nil {
+		t.Fatalf("UpdateRequest detach: %v", err)
+	}
+	again, err := store.RequestByID(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("RequestByID after detach: %v", err)
+	}
+	if again.Template != nil || len(again.Skills) != 0 {
+		t.Errorf("after detach template/skills = (%+v, %v), want nil/empty", again.Template, again.Skills)
 	}
 }

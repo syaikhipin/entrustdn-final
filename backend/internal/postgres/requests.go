@@ -31,18 +31,21 @@ var _ requests.Store = (*RequestsStore)(nil)
 
 const requestColumns = `
 	id, consumer_id, description, format, quality_bar, budget_micros,
-	spent_micros, status, messages, matches, created_at, updated_at`
+	spent_micros, status, messages, matches, template, skills,
+	created_at, updated_at`
 
 // scanRequest decodes one row. The consumer ID is cast to text — the
 // requests package speaks opaque consumer IDs, and account UUIDs are valid
-// text IDs.
+// text IDs. Template (ticket 13) is NULL for the default flow; skills is
+// always a JSON array.
 func (s *RequestsStore) scanRequest(row pgx.Row) (requests.Request, error) {
 	var r requests.Request
-	var messages, matches []byte
+	var messages, matches, skills []byte
+	var template []byte
 	var consumerID string
 	err := row.Scan(&r.ID, &consumerID, &r.Description, &r.Format, &r.QualityBar,
 		&r.BudgetMicros, &r.SpentMicros, &r.Status, &messages, &matches,
-		&r.CreatedAt, &r.UpdatedAt)
+		&template, &skills, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return requests.Request{}, err
 	}
@@ -52,6 +55,18 @@ func (s *RequestsStore) scanRequest(row pgx.Row) (requests.Request, error) {
 	}
 	if err := json.Unmarshal(matches, &r.Matches); err != nil {
 		return requests.Request{}, fmt.Errorf("decode matches for %s: %w", r.ID, err)
+	}
+	if len(template) > 0 {
+		var att requests.TemplateAttachment
+		if err := json.Unmarshal(template, &att); err != nil {
+			return requests.Request{}, fmt.Errorf("decode template for %s: %w", r.ID, err)
+		}
+		r.Template = &att
+	}
+	if len(skills) > 0 {
+		if err := json.Unmarshal(skills, &r.Skills); err != nil {
+			return requests.Request{}, fmt.Errorf("decode skills for %s: %w", r.ID, err)
+		}
 	}
 	return r, nil
 }
@@ -70,6 +85,22 @@ func encodeMatches(ms []requests.Match) ([]byte, error) {
 	return json.Marshal(ms)
 }
 
+// encodeTemplate renders the attachment snapshot; nil (the default flow)
+// stores as SQL NULL.
+func encodeTemplate(t *requests.TemplateAttachment) ([]byte, error) {
+	if t == nil {
+		return nil, nil
+	}
+	return json.Marshal(t)
+}
+
+func encodeSkills(ids []string) ([]byte, error) {
+	if len(ids) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(ids)
+}
+
 // CreateRequest inserts the commission; zero timestamps are filled in here
 // and written back through the pointer, matching the Store contract.
 func (s *RequestsStore) CreateRequest(ctx context.Context, r *requests.Request) error {
@@ -81,6 +112,14 @@ func (s *RequestsStore) CreateRequest(ctx context.Context, r *requests.Request) 
 	if err != nil {
 		return fmt.Errorf("encode matches: %w", err)
 	}
+	template, err := encodeTemplate(r.Template)
+	if err != nil {
+		return fmt.Errorf("encode template: %w", err)
+	}
+	skills, err := encodeSkills(r.Skills)
+	if err != nil {
+		return fmt.Errorf("encode skills: %w", err)
+	}
 	now := time.Now().UTC()
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = now
@@ -91,11 +130,12 @@ func (s *RequestsStore) CreateRequest(ctx context.Context, r *requests.Request) 
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO data_requests
 			(id, consumer_id, description, format, quality_bar, budget_micros,
-			 spent_micros, status, messages, matches, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			 spent_micros, status, messages, matches, template, skills,
+			 created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		r.ID, r.ConsumerID, r.Description, r.Format, r.QualityBar,
 		r.BudgetMicros, r.SpentMicros, string(r.Status), messages, matches,
-		r.CreatedAt, r.UpdatedAt)
+		template, skills, r.CreatedAt, r.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert data request: %w", err)
 	}
@@ -131,7 +171,7 @@ func (s *RequestsStore) RequestsByConsumer(ctx context.Context, consumerID strin
 }
 
 // UpdateRequest rewrites the whole record after a chat turn: messages,
-// matches, spend, status.
+// matches, spend, status — and, ticket 13, the module attachments.
 func (s *RequestsStore) UpdateRequest(ctx context.Context, r requests.Request) error {
 	messages, err := encodeMessages(r.Messages)
 	if err != nil {
@@ -141,14 +181,22 @@ func (s *RequestsStore) UpdateRequest(ctx context.Context, r requests.Request) e
 	if err != nil {
 		return fmt.Errorf("encode matches: %w", err)
 	}
+	template, err := encodeTemplate(r.Template)
+	if err != nil {
+		return fmt.Errorf("encode template: %w", err)
+	}
+	skills, err := encodeSkills(r.Skills)
+	if err != nil {
+		return fmt.Errorf("encode skills: %w", err)
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE data_requests
 		SET description = $2, format = $3, quality_bar = $4, budget_micros = $5,
 		    spent_micros = $6, status = $7, messages = $8, matches = $9,
-		    updated_at = now()
+		    template = $10, skills = $11, updated_at = now()
 		WHERE id = $1`,
 		r.ID, r.Description, r.Format, r.QualityBar, r.BudgetMicros,
-		r.SpentMicros, string(r.Status), messages, matches)
+		r.SpentMicros, string(r.Status), messages, matches, template, skills)
 	if err != nil {
 		return fmt.Errorf("update data request: %w", err)
 	}

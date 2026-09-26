@@ -44,12 +44,22 @@
         "body": { "type": "string", "minLength": 1 }
       }
     },
+    "skill_module": {
+      "type": "object",
+      "description": "One Agent Skill loaded into the agent's context for this turn (ticket 13): the skill's name and its markdown instructions. Instructions are data the agent reads, never code it runs.",
+      "required": ["name", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "content": { "type": "string", "minLength": 1 }
+      }
+    },
     "request_clarify_request": {
       "type": "object",
-      "description": "Sent backend→agent for one clarification turn: the Request so far, the consumer's new message, the conversation history, and the catalog snapshot to check first.",
+      "description": "Sent backend→agent for one clarification turn: the Request so far, the consumer's new message, the conversation history, the catalog snapshot to check first, and any attached Agent Skills to load into context.",
       "required": [
         "request_id", "description", "format", "quality_bar", "budget_micros",
-        "spent_micros", "message", "history", "catalog"
+        "spent_micros", "message", "history", "catalog", "skills"
       ],
       "additionalProperties": false,
       "properties": {
@@ -61,7 +71,8 @@
         "spent_micros": { "type": "integer", "minimum": 0 },
         "message": { "type": "string", "minLength": 1 },
         "history": { "type": "array", "items": { "$ref": "#/$defs/history_turn" } },
-        "catalog": { "type": "array", "items": { "$ref": "#/$defs/catalog_asset" } }
+        "catalog": { "type": "array", "items": { "$ref": "#/$defs/catalog_asset" } },
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/skill_module" } }
       }
     },
     "catalog_match": {

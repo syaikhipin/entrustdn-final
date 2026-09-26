@@ -20,6 +20,7 @@ import (
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 )
 
 // Status is where a Request sits in its life.
@@ -46,6 +47,10 @@ var ErrForbidden = errors.New("requests: not your request")
 // ErrClosed is returned when a chat turn arrives for a Request that is no
 // longer taking turns.
 var ErrClosed = errors.New("requests: request is not open for clarification")
+
+// ErrTooManySkills marks an attach that would exceed the request's skill
+// cap — the caller's fault, so the API renders it 422.
+var ErrTooManySkills = errors.New("requests: too many skills")
 
 // ErrBudgetExceeded wraps the refusal to charge a turn that would cross the
 // request's budget (and, via credits.ErrInsufficientFunds inside it, the
@@ -82,9 +87,24 @@ type Request struct {
 	// Messages is the full web-chat conversation, oldest first.
 	Messages []Message
 	// Matches is every existing-Asset match the Agent has reported so far.
-	Matches   []Match
+	Matches []Match
+	// Template is the attached Process Template snapshot (ticket 13): the
+	// spec rides the Request, so the Collection's questions and triggers
+	// are frozen at attach time. Nil means the default flow.
+	Template *TemplateAttachment
+	// Skills lists the attached Agent Skills' Module IDs — the agent loads
+	// their instructions into context for every clarify turn.
+	Skills    []string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// TemplateAttachment is the frozen copy of a Process Template attached to
+// a Request: which Module it came from, and the parsed spec as it stood
+// when the consumer attached it.
+type TemplateAttachment struct {
+	ModuleID string               `json:"module_id"`
+	Spec     modules.TemplateSpec `json:"spec"`
 }
 
 // NewRequest is what the Consumer submits when creating a Request.
@@ -215,6 +235,17 @@ type Clarifier interface {
 	Clarify(ctx context.Context, req contract.ClarifyRequest) (contract.ClarifyResponse, error)
 }
 
+// ModuleSource is the ticket-13 seam to the Module registry: the request
+// service asks it who may use a Module (attach-time authorization) and
+// loads an attached Agent Skill's content (turn-time, so the latest
+// version always rides the wire). *modules.Service satisfies it; tests use
+// a fake. Nil means no Modules are attached to anything — the default
+// collection flow and no loaded skills, exactly the pre-ticket-13 shape.
+type ModuleSource interface {
+	Accessible(ctx context.Context, callerID, moduleID string) error
+	Skill(ctx context.Context, callerID, moduleID string) (modules.SkillContent, error)
+}
+
 // CatalogSource hands the agent the current catalog snapshot each turn —
 // "checks the catalog first" means every turn sees the live inventory.
 type CatalogSource func(ctx context.Context) ([]contract.CatalogAsset, error)
@@ -226,6 +257,9 @@ type Service struct {
 	agent   Clarifier
 	catalog CatalogSource
 	credits *credits.Service
+	// mods is the Module registry seam (ticket 13); nil disables module
+	// attachment entirely.
+	mods ModuleSource
 
 	// turns guards the chat path's read-check-charge-update against
 	// concurrent turns on one request. The guard's cap is only as honest as
@@ -240,6 +274,11 @@ type Service struct {
 func NewService(store Store, agent Clarifier, catalog CatalogSource, credSvc *credits.Service) *Service {
 	return &Service{store: store, agent: agent, catalog: catalog, credits: credSvc}
 }
+
+// SetModuleSource attaches the Module registry seam after construction —
+// the API layer wires it late (the registry service is built beside the
+// request handlers, not before them).
+func SetModuleSource(s *Service, m ModuleSource) { s.mods = m }
 
 // lockRequest returns the per-request turn mutex, minting it on first use.
 func (s *Service) lockRequest(id string) *sync.Mutex {
@@ -353,6 +392,13 @@ func (s *Service) Chat(ctx context.Context, id, consumerID, message string) (Tur
 	if req.Catalog == nil {
 		req.Catalog = []contract.CatalogAsset{}
 	}
+	// Attached Agent Skills ride every turn (ticket 13): the agent loads
+	// their instructions into context before answering.
+	skills, err := s.loadSkills(ctx, r)
+	if err != nil {
+		return Turn{}, err
+	}
+	req.Skills = skills
 
 	resp, err := s.agent.Clarify(ctx, req)
 	if err != nil {

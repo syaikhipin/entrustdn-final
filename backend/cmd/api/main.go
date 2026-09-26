@@ -14,11 +14,11 @@ import (
 	"github.com/syaikhipin/entrustdn-final/backend/internal/anonymize"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/api"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/assets"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/collections"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/config"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
-	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
-	"github.com/syaikhipin/entrustdn-final/backend/internal/collections"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/conversations"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/objectstore"
@@ -125,6 +125,12 @@ func run() error {
 		log.Printf("thresh-backend %s: S3_ENDPOINT_URL not set — asset endpoints disabled", version)
 	}
 
+	// Module registry (ticket 08): DB-only — no object storage dependency.
+	// Any active account may upload; the Platform Admin promotes. Built
+	// before the requests deps so ticket 13's attach endpoints can authorize
+	// through it.
+	modulesSvc := modules.NewService(postgres.NewModulesStore(pool))
+
 	// Requests & clarification (ticket 07): every chat turn hands the agent
 	// a live catalog snapshot — the assets service's catalog at the current
 	// price book's cached-download price. Without object storage there is
@@ -133,6 +139,8 @@ func run() error {
 		rulesLoader := postgres.CreditRulesLoader(pool)
 		requestsDeps = &api.RequestsDeps{
 			Store: postgres.NewRequestsStore(pool),
+			// Ticket 13: the registry authorizes every template/skill attach.
+			Modules: modulesSvc,
 			Catalog: func(ctx context.Context) ([]contract.CatalogAsset, error) {
 				rules, err := rulesLoader(ctx)
 				if err != nil {
@@ -160,10 +168,6 @@ func run() error {
 			},
 		}
 	}
-
-	// Module registry (ticket 08): DB-only — no object storage dependency.
-	// Any active account may upload; the Platform Admin promotes.
-	modulesSvc := modules.NewService(postgres.NewModulesStore(pool))
 
 	// Data Collections (ticket 12): re-asks open through the same
 	// conversations service shape the endpoints use, the delivery is

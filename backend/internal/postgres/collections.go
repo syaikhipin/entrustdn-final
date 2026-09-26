@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/collections"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/requests"
 )
 
 // The Postgres implementation of collections.Store (ticket 12; ADR 0007).
@@ -35,15 +36,15 @@ var _ collections.Store = (*CollectionsStore)(nil)
 
 const collectionColumns = `
 	id, org_id, consumer_id, request_id, deadline, status, items, missing,
-	created_at, updated_at`
+	template, created_at, updated_at`
 
 func scanCollection(row pgx.Row) (collections.Collection, error) {
 	var c collections.Collection
 	var orgID, consumerID string
-	var items, missing []byte
+	var items, missing, template []byte
 	var deadline *time.Time
 	err := row.Scan(&c.ID, &orgID, &consumerID, &c.RequestID, &deadline,
-		&c.Status, &items, &missing, &c.CreatedAt, &c.UpdatedAt)
+		&c.Status, &items, &missing, &template, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return collections.Collection{}, err
 	}
@@ -60,6 +61,13 @@ func scanCollection(row pgx.Row) (collections.Collection, error) {
 			return collections.Collection{}, fmt.Errorf("decode missing for %s: %w", c.ID, err)
 		}
 	}
+	if len(template) > 0 {
+		var att requests.TemplateAttachment
+		if err := json.Unmarshal(template, &att); err != nil {
+			return collections.Collection{}, fmt.Errorf("decode template for %s: %w", c.ID, err)
+		}
+		c.Template = &att
+	}
 	return c, nil
 }
 
@@ -74,6 +82,14 @@ func (s *CollectionsStore) CreateCollection(ctx context.Context, c *collections.
 	if err != nil {
 		return fmt.Errorf("encode missing: %w", err)
 	}
+	// Checked against the concrete pointer: a typed-nil inside any would
+	// slip past a nil-interface check and store the JSON literal null.
+	var template []byte
+	if c.Template != nil {
+		if template, err = encodeJSON(c.Template); err != nil {
+			return fmt.Errorf("encode template: %w", err)
+		}
+	}
 	now := time.Now().UTC()
 	if c.CreatedAt.IsZero() {
 		c.CreatedAt = now
@@ -84,10 +100,10 @@ func (s *CollectionsStore) CreateCollection(ctx context.Context, c *collections.
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO data_collections
 			(id, org_id, consumer_id, request_id, deadline, status, items, missing,
-			 created_at, updated_at)
-		VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10)`,
+			 template, created_at, updated_at)
+		VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11)`,
 		c.ID, c.OrgID, c.ConsumerID, c.RequestID, c.Deadline, string(c.Status),
-		items, missing, c.CreatedAt, c.UpdatedAt)
+		items, missing, template, c.CreatedAt, c.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert data collection: %w", err)
 	}
@@ -142,12 +158,18 @@ func (s *CollectionsStore) UpdateCollection(ctx context.Context, c collections.C
 	if err != nil {
 		return fmt.Errorf("encode missing: %w", err)
 	}
+	var template []byte
+	if c.Template != nil {
+		if template, err = encodeJSON(c.Template); err != nil {
+			return fmt.Errorf("encode template: %w", err)
+		}
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE data_collections
 		SET request_id = $2, deadline = $3, status = $4, items = $5,
-		    missing = $6, updated_at = now()
+		    missing = $6, template = $7, updated_at = now()
 		WHERE id = $1`,
-		c.ID, c.RequestID, c.Deadline, string(c.Status), items, missing)
+		c.ID, c.RequestID, c.Deadline, string(c.Status), items, missing, template)
 	if err != nil {
 		return fmt.Errorf("update data collection: %w", err)
 	}

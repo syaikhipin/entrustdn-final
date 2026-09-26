@@ -123,7 +123,13 @@ type Collection struct {
 	Status   Status
 	Items    []Item
 	// Missing is the missing-data summary of an incomplete collection.
-	Missing   []Missing
+	Missing []Missing
+	// Template is the Process Template snapshot stamped at Create (ticket
+	// 13): its questions already materialized the items, and its trigger
+	// rules and follow-up policy govern every Sync. Nil means the default
+	// flow — platform triggers, default re-ask budget. The snapshot makes
+	// in-flight gathering immune to later template changes on the Request.
+	Template  *requests.TemplateAttachment
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -137,11 +143,10 @@ type NewCollection struct {
 	Deadline *time.Time
 }
 
-// Validate refuses records that must never be stored.
+// Validate refuses records that must never be stored. Questions are
+// checked for blankness here but their presence in Create — which knows
+// whether a Process Template supplies them (ticket 13).
 func (n NewCollection) Validate() error {
-	if len(n.Questions) == 0 {
-		return fmt.Errorf("collections: at least one question is required")
-	}
 	if len(n.MemberIDs) == 0 {
 		return fmt.Errorf("collections: at least one member is required")
 	}
@@ -304,6 +309,9 @@ func (m *MemoryStore) list(match func(Collection) bool) []Collection {
 
 // Create opens a Collection: a clarified Request, the org's roster members,
 // and the questions to gather — items materialize as the cross product.
+// When the Request carries an attached Process Template (ticket 13), the
+// template's own question list replaces the caller's: the org passes a
+// non-empty placeholder only to signal they are following the template.
 func (s *Service) Create(ctx context.Context, orgID string, n NewCollection) (Collection, error) {
 	if err := n.Validate(); err != nil {
 		return Collection{}, err
@@ -317,6 +325,15 @@ func (s *Service) Create(ctx context.Context, orgID string, n NewCollection) (Co
 	}
 	if r.Status != requests.StatusClarified {
 		return Collection{}, fmt.Errorf("collections: request %s is %s, not clarified — field it first", r.ID, r.Status)
+	}
+	questions := n.Questions
+	if r.Template != nil {
+		// The template owns the question list: whatever the caller passed is
+		// replaced. With no template, at least one question is required.
+		questions = r.Template.Spec.Questions
+	}
+	if len(questions) == 0 {
+		return Collection{}, fmt.Errorf("collections: at least one question is required")
 	}
 	members, err := s.roster.MembersByOrg(ctx, orgID)
 	if err != nil {
@@ -335,12 +352,16 @@ func (s *Service) Create(ctx context.Context, orgID string, n NewCollection) (Co
 		Deadline: n.Deadline, Status: StatusCollecting,
 		Items: []Item{}, Missing: []Missing{},
 	}
+	if r.Template != nil {
+		snap := *r.Template
+		c.Template = &snap
+	}
 	for _, mid := range n.MemberIDs {
 		m, ok := byID[mid]
 		if !ok || m.OrgID != orgID {
 			return Collection{}, fmt.Errorf("collections: member %s is not on the org's roster", mid)
 		}
-		for _, q := range n.Questions {
+		for _, q := range questions {
 			c.Items = append(c.Items, Item{
 				MemberID: m.ID, MemberName: m.DisplayName, Question: q,
 				Status: ItemCollecting, Rounds: []Round{},
@@ -449,7 +470,16 @@ func (s *Service) Sync(ctx context.Context, id, orgID string) (Collection, error
 					continue
 				}
 				ans := cv.Answers[ai]
-				v := Evaluate(it.Question, ans)
+				// Template-sourced triggers when the collection carries a
+				// Process Template (ticket 13); the platform defaults
+				// otherwise.
+				var v Verdict
+				if c.Template != nil {
+					rv := c.Template.Spec.Evaluate(it.Question, ans)
+					v = Verdict{OK: rv.OK, Reason: rv.Reason}
+				} else {
+					v = Evaluate(it.Question, ans)
+				}
 				it.Rounds = append(it.Rounds, Round{
 					ConversationID: cv.ID, Answer: ans,
 					OK: v.OK, Reason: v.Reason, At: now,
@@ -477,7 +507,14 @@ func (s *Service) Sync(ctx context.Context, id, orgID string) (Collection, error
 			continue
 		}
 
-		// Re-ask on a bad answer, unless the cap has been reached.
+		// Re-ask on a bad answer, unless the cap has been reached. The cap
+		// comes from the collection's template when it sets one (ticket 13),
+		// otherwise the platform default.
+		reaskCap := reaskCapFor(c)
+		reaskTopic := "A follow-up on your earlier answer"
+		if c.Template != nil && c.Template.Spec.FollowUp.Topic != "" {
+			reaskTopic = c.Template.Spec.FollowUp.Topic
+		}
 		badRounds := 0
 		for _, r := range it.Rounds {
 			if !r.OK {
@@ -490,10 +527,10 @@ func (s *Service) Sync(ctx context.Context, id, orgID string) (Collection, error
 		if badRounds <= it.Reasks {
 			continue // every bad answer already has its re-ask in flight
 		}
-		if it.Reasks >= MaxReasksPerItem {
+		if it.Reasks >= reaskCap {
 			it.Status = ItemBlocked
 			it.Blocked = true
-			it.BlockReason = fmt.Sprintf("the re-ask limit (%d) was reached without a usable answer", MaxReasksPerItem)
+			it.BlockReason = fmt.Sprintf("the re-ask limit (%d) was reached without a usable answer", reaskCap)
 			continue
 		}
 		// Open as planned, persist as sent: each open's success is counted
@@ -506,7 +543,7 @@ func (s *Service) Sync(ctx context.Context, id, orgID string) (Collection, error
 			MemberID:   it.MemberID,
 			MemberName: it.MemberName,
 			Contact:    s.memberContact(ctx, c.OrgID, it.MemberID),
-			Topic:      "A follow-up on your earlier answer",
+			Topic:      reaskTopic,
 			Questions:  []string{it.Question},
 		}
 		if _, err := s.opener.Start(ctx, st); err != nil {
@@ -526,7 +563,7 @@ func (s *Service) Sync(ctx context.Context, id, orgID string) (Collection, error
 	if c.Status == StatusCollecting {
 		if allAccepted(c) {
 			c.Status = StatusCompleted
-		} else if deadlinePassed(c, now) || s.budgetGone(ctx, c) || allBlockedOrNoPath(c) {
+		} else if deadlinePassed(c, now) || s.budgetGone(ctx, c) || s.allBlockedOrNoPath(c) {
 			c.Status = StatusIncomplete
 		}
 	}
@@ -592,12 +629,23 @@ func (s *Service) budgetGone(ctx context.Context, c Collection) bool {
 	return r.Status == requests.StatusBudgetExhausted
 }
 
+// reaskCapFor returns the item-blocking re-ask budget in force for this
+// collection: the template's when it sets one, the platform default
+// otherwise.
+func reaskCapFor(c Collection) int {
+	if c.Template != nil && c.Template.Spec.FollowUp.MaxReasks != nil {
+		return *c.Template.Spec.FollowUp.MaxReasks
+	}
+	return MaxReasksPerItem
+}
+
 // allBlockedOrNoPath reports whether every non-accepted item is blocked or
 // has exhausted its re-ask budget — no path left to completion.
-func allBlockedOrNoPath(c Collection) bool {
+func (s *Service) allBlockedOrNoPath(c Collection) bool {
 	if len(c.Items) == 0 {
 		return false
 	}
+	cap := reaskCapFor(c)
 	for _, it := range c.Items {
 		switch it.Status {
 		case ItemAccepted:
@@ -606,7 +654,7 @@ func allBlockedOrNoPath(c Collection) bool {
 			continue
 		case ItemCollecting:
 			// A re-ask may still be in flight and come back good.
-			if it.Reasks < MaxReasksPerItem {
+			if it.Reasks < cap {
 				return false
 			}
 		}

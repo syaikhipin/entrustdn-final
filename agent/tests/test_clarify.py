@@ -132,6 +132,32 @@ class TestClarificationLoop:
         assert resp.matches == []
         assert resp.reply  # still answers with the next question
 
+    def test_attached_skills_load_into_the_agent_context(self) -> None:
+        """Ticket 13: skills attached to the Request ride into the system
+        prompt — the agent reads them as instructions, and a request with
+        no skills keeps a prompt with no skills section."""
+        gw = FakeModelGateway()
+        loop = ClarificationLoop(gateway=gw)
+
+        loop.turn(
+            clarify_request(
+                skills=[
+                    {
+                        "name": "Teagasc barley conventions",
+                        "content": "- Yields are quoted in t/ha.",
+                    }
+                ]
+            )
+        )
+        system, _ = gw.calls[0]
+        assert "Teagasc barley conventions" in system
+        assert "t/ha" in system
+        assert "guidance, not code" in system
+
+        loop.turn(clarify_request())
+        system, _ = gw.calls[1]
+        assert "Skill:" not in system  # no skills, no skills section
+
 
 def test_match_requires_more_than_one_shared_word() -> None:
     """One shared word is not a match: 'dairy census data' must not report

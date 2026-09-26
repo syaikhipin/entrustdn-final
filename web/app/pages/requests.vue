@@ -207,6 +207,15 @@ const canSubmit = computed(
             {{ m.name }}
           </span>
         </p>
+        <p v-if="openRequest.template || openRequest.skills.length" class="matches hint">
+          Modules on this request:
+          <span v-if="openRequest.template" class="pill" title="A Process Template drives this request's collection">
+            template · {{ openRequest.template.moduleId.slice(0, 8) }}…
+          </span>
+          <span v-for="s in openRequest.skills" :key="s" class="pill" title="An Agent Skill loads into the agent's context">
+            skill · {{ s.slice(0, 8) }}…
+          </span>
+        </p>
         <div class="chat" aria-live="polite">
           <p v-if="openRequest.messages.length === 0" class="hint">
             No messages yet — say what you need.

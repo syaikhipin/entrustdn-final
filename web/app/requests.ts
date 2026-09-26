@@ -24,6 +24,13 @@ export interface AssetMatch {
   reportedAt: string;
 }
 
+// Ticket 13: the module attachments a request carries. The template is the
+// attachment's identity (the parsed spec stays backend-side); skills are
+// module ids whose markdown the agent loads each turn.
+export interface TemplateAttachment {
+  moduleId: string;
+}
+
 export interface DataRequest {
   id: string;
   description: string;
@@ -34,6 +41,8 @@ export interface DataRequest {
   status: RequestStatus;
   messages: ChatMessage[];
   matches: AssetMatch[];
+  template: TemplateAttachment | null;
+  skills: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -89,6 +98,11 @@ function parseMatch(doc: unknown): AssetMatch {
 
 export function parseRequest(doc: unknown): DataRequest {
   const d = assertObject(doc, "request");
+  let template: TemplateAttachment | null = null;
+  if (d.template !== undefined && d.template !== null) {
+    const t = assertObject(d.template, "request template");
+    template = { moduleId: assertString(t.module_id, "template module_id") };
+  }
   return {
     id: assertString(d.id, "request id"),
     description: assertString(d.description, "request description"),
@@ -99,6 +113,8 @@ export function parseRequest(doc: unknown): DataRequest {
     status: parseStatus(d.status),
     messages: Array.isArray(d.messages) ? d.messages.map(parseMessage) : [],
     matches: Array.isArray(d.matches) ? d.matches.map(parseMatch) : [],
+    template,
+    skills: Array.isArray(d.skills) ? d.skills.map((s) => assertString(s, "request skill")) : [],
     createdAt: assertString(d.created_at, "request created_at"),
     updatedAt: assertString(d.updated_at, "request updated_at"),
   };
@@ -168,4 +184,55 @@ export async function chatTurn(
 // 10,000 µcr spent". Micro-credits are the ledger's exact unit.
 export function formatBudget(spentMicros: number, budgetMicros: number): string {
   return `${spentMicros.toLocaleString("en-IE")} of ${budgetMicros.toLocaleString("en-IE")} µcr spent`;
+}
+
+// attachTemplate pins a Process Template module onto the request (ticket
+// 13): its questions and triggers drive the collection conversation.
+export async function attachTemplate(
+  backend: string,
+  token: string,
+  id: string,
+  moduleId: string,
+): Promise<DataRequest> {
+  const doc = await apiCall<{ request: unknown }>(backend, `/api/v1/requests/${id}/template`, {
+    method: "PUT",
+    headers: authedHeader(token),
+    body: JSON.stringify({ module_id: moduleId }),
+  });
+  return parseRequest(doc.request);
+}
+
+export async function detachTemplate(backend: string, token: string, id: string): Promise<DataRequest> {
+  const doc = await apiCall<{ request: unknown }>(backend, `/api/v1/requests/${id}/template`, {
+    method: "DELETE",
+    headers: authedHeader(token),
+  });
+  return parseRequest(doc.request);
+}
+
+export async function attachSkill(
+  backend: string,
+  token: string,
+  id: string,
+  moduleId: string,
+): Promise<DataRequest> {
+  const doc = await apiCall<{ request: unknown }>(backend, `/api/v1/requests/${id}/skills`, {
+    method: "POST",
+    headers: authedHeader(token),
+    body: JSON.stringify({ module_id: moduleId }),
+  });
+  return parseRequest(doc.request);
+}
+
+export async function detachSkill(
+  backend: string,
+  token: string,
+  id: string,
+  moduleId: string,
+): Promise<DataRequest> {
+  const doc = await apiCall<{ request: unknown }>(backend, `/api/v1/requests/${id}/skills/${moduleId}`, {
+    method: "DELETE",
+    headers: authedHeader(token),
+  });
+  return parseRequest(doc.request);
 }

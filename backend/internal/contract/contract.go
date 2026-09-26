@@ -136,9 +136,18 @@ type HistoryTurn struct {
 	Body string `json:"body"`
 }
 
+// SkillModule is one Agent Skill loaded into the agent's context (ticket
+// 13): the skill's name and its markdown instructions. Instructions are
+// data the agent reads, never code it runs.
+type SkillModule struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+}
+
 // ClarifyRequest is one clarification turn sent backend→agent: the Request
-// so far, the Consumer's new message, the conversation history, and the
-// catalog snapshot to check first.
+// so far, the Consumer's new message, the conversation history, the catalog
+// snapshot to check first, and any attached Agent Skills to load into
+// context (ticket 13).
 type ClarifyRequest struct {
 	RequestID    string         `json:"request_id"`
 	Description  string         `json:"description"`
@@ -149,6 +158,7 @@ type ClarifyRequest struct {
 	Message      string         `json:"message"`
 	History      []HistoryTurn  `json:"history"`
 	Catalog      []CatalogAsset `json:"catalog"`
+	Skills       []SkillModule  `json:"skills"`
 }
 
 // UnmarshalJSON decodes strictly: unknown fields are contract violations

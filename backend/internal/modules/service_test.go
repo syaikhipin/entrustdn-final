@@ -333,3 +333,92 @@ func versionStrings(ms []modules.Module) []string {
 	}
 	return out
 }
+
+// Ticket 13: authorization for module *consumption*. Other services (the
+// request endpoints attaching a template, the agent loading skills) must
+// ask the registry who may use a Module — author, grantee, or anyone once
+// system-wide. Private Module consumption by a stranger is refused.
+
+func TestAccessibleGatesWhoMayUseAModule(t *testing.T) {
+	svc := newTestService()
+	m, err := svc.Upload(t.Context(), authorID, validManifest())
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	// Before any grant: the author may use it, a stranger may not.
+	if err := svc.Accessible(t.Context(), authorID, m.ModuleID); err != nil {
+		t.Errorf("author Accessible = %v; want nil", err)
+	}
+	if err := svc.Accessible(t.Context(), "stranger-1", m.ModuleID); err == nil {
+		t.Errorf("stranger Accessible = nil; want an error")
+	}
+
+	// After a grant the grantee may use it too.
+	if err := svc.Grant(t.Context(), authorID, m.ModuleID, "grantee-1"); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if err := svc.Accessible(t.Context(), "grantee-1", m.ModuleID); err != nil {
+		t.Errorf("grantee Accessible = %v; want nil", err)
+	}
+}
+
+func TestAccessibleAllowsEveryoneOnceSystemWide(t *testing.T) {
+	svc := newTestService()
+	m, err := svc.Upload(t.Context(), authorID, validManifest())
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if _, err := svc.Promote(t.Context(), true, m.ModuleID, true); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if err := svc.Accessible(t.Context(), "random-account", m.ModuleID); err != nil {
+		t.Errorf("system-wide Accessible = %v; want nil for anyone", err)
+	}
+}
+
+func TestAccessibleRefusesUnknownModules(t *testing.T) {
+	svc := newTestService()
+	if err := svc.Accessible(t.Context(), authorID, "no-such-module"); err == nil {
+		t.Errorf("unknown module Accessible succeeded, want an error")
+	}
+}
+
+func TestTemplateLoadsTheParsedSpecForAuthorizedCallers(t *testing.T) {
+	// Ticket 13's template half of the consumption seam: Template returns
+	// the latest version's config, parsed and validated, for anyone who may
+	// use the module — author, grantee, or anyone once system-wide — and
+	// refuses strangers with ErrForbidden.
+	svc := newTestService()
+	n := validManifest()
+	n.Config = `{"questions": ["What county is your farm in?", "How many hectares?"], "follow_up": {"max_reasks": 3}}`
+	m, err := svc.Upload(t.Context(), authorID, n)
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	for _, caller := range []string{authorID, "stranger-1"} {
+		spec, err := svc.Template(t.Context(), caller, m.ModuleID)
+		if caller == authorID {
+			if err != nil {
+				t.Fatalf("author Template: %v", err)
+			}
+			if len(spec.Questions) != 2 || spec.Questions[0] != "What county is your farm in?" {
+				t.Errorf("spec = %+v, want the parsed questions", spec)
+			}
+			if spec.FollowUp.MaxReasks == nil || *spec.FollowUp.MaxReasks != 3 {
+				t.Errorf("follow_up = %+v, want max_reasks 3", spec.FollowUp)
+			}
+		} else if err == nil {
+			t.Errorf("stranger Template succeeded, want ErrForbidden")
+		}
+	}
+
+	// A grantee gets the same parsed spec.
+	if err := svc.Grant(t.Context(), authorID, m.ModuleID, "grantee-1"); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if _, err := svc.Template(t.Context(), "grantee-1", m.ModuleID); err != nil {
+		t.Errorf("grantee Template: %v", err)
+	}
+}

@@ -9,7 +9,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/collections"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/postgres"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/requests"
 )
 
 // The Postgres-backed collections.Store (ticket 12; ADR 0007: the system
@@ -172,5 +174,47 @@ func TestCollectionsStoreListsAndNotFound(t *testing.T) {
 
 	if err := store.UpdateCollection(ctx, collections.Collection{ID: "ghost"}); !errors.Is(err, collections.ErrNotFound) {
 		t.Errorf("update of a ghost = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCollectionsStoreRoundTripsTheTemplateSnapshot(t *testing.T) {
+	// Ticket 13: a collection created from a templated Request carries the
+	// frozen template snapshot; NULL comes back as nil (the default flow).
+	store, _, ctx, orgID, consumerID := collectionsFixture(t)
+
+	c := storedCollection(orgID, consumerID)
+	maxReasks := 2
+	c.Template = &requests.TemplateAttachment{
+		ModuleID: "mod-tpl-9",
+		Spec: modules.TemplateSpec{
+			Questions: []string{"How many hectares of spring barley?"},
+			FollowUp:  modules.FollowUpRules{MaxReasks: &maxReasks},
+		},
+	}
+	if err := store.CreateCollection(ctx, &c); err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	got, err := store.CollectionByID(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("CollectionByID: %v", err)
+	}
+	if got.Template == nil || got.Template.ModuleID != "mod-tpl-9" {
+		t.Fatalf("template = %+v, want the mod-tpl-9 snapshot", got.Template)
+	}
+	if len(got.Template.Spec.Questions) != 1 || got.Template.Spec.Questions[0] != "How many hectares of spring barley?" {
+		t.Errorf("spec = %+v, want the frozen question", got.Template.Spec)
+	}
+
+	// NULL template (the default flow) reads back as nil.
+	plain := storedCollection(orgID, consumerID)
+	if err := store.CreateCollection(ctx, &plain); err != nil {
+		t.Fatalf("CreateCollection plain: %v", err)
+	}
+	gotPlain, err := store.CollectionByID(ctx, plain.ID)
+	if err != nil {
+		t.Fatalf("CollectionByID plain: %v", err)
+	}
+	if gotPlain.Template != nil {
+		t.Errorf("plain template = %+v, want nil", gotPlain.Template)
 	}
 }
