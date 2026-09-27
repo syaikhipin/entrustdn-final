@@ -88,15 +88,23 @@ func fakeCallback(t *testing.T, ref string, outcome payments.Outcome, amountMino
 
 // newService returns a Service wired to the fake gateway, the in-memory
 // payments store, and an in-memory Ledger. The rate is one credit per euro
-// (10_000 µcr per cent).
+// (10_000 µcr per cent). Two providers share the one fake — the gateway
+// seam is provider-agnostic, and ticket 18's switch tests need a second
+// registered name to switch to. The store's LoadConfig is the service's
+// config loader (production wiring), pre-seeded with the stripe gateway
+// enabled exactly as the admin API's config row enables it in production.
 func newService(t *testing.T) (*payments.Service, *fakeGateway, *payments.MemoryStore, *credits.MemoryStore) {
 	t.Helper()
 	gw := newFakeGateway()
 	ledger := credits.NewMemoryStore()
 	store := payments.NewMemoryStore(ledger)
+	if err := store.SaveConfig(context.Background(), stripeCfg()); err != nil {
+		t.Fatalf("seed stripe config: %v", err)
+	}
 	reg := payments.NewRegistry()
 	reg.Register("stripe", func(payments.Config) (payments.Gateway, error) { return gw, nil })
-	svc := payments.NewService(store, testConfigLoader, reg.GatewayFor)
+	reg.Register("paypal", func(payments.Config) (payments.Gateway, error) { return gw, nil })
+	svc := payments.NewService(store, store.LoadConfig, reg.GatewayFor)
 	return svc, gw, store, ledger
 }
 
@@ -186,7 +194,7 @@ func TestSettledCallbackPostsBalancedTopUpToTheLedger(t *testing.T) {
 	}
 
 	header, body := fakeCallback(t, tu.Reference, payments.OutcomePaid, 2500)
-	got, result, err := svc.SettleCallback(t.Context(), header, body)
+	got, result, err := svc.SettleCallback(t.Context(), "stripe", header, body)
 	if err != nil {
 		t.Fatalf("SettleCallback: %v", err)
 	}
@@ -240,7 +248,7 @@ func TestFailedAndCancelledCallbacksNeverCredit(t *testing.T) {
 			}
 
 			header, body := fakeCallback(t, tu.Reference, tt.outcome, 1000)
-			got, result, err := svc.SettleCallback(t.Context(), header, body)
+			got, result, err := svc.SettleCallback(t.Context(), "stripe", header, body)
 			if err != nil {
 				t.Fatalf("SettleCallback(%s): %v", tt.outcome, err)
 			}
@@ -268,14 +276,14 @@ func TestReplayOfSettledCallbackCreditsNothingMore(t *testing.T) {
 		t.Fatalf("Initiate: %v", err)
 	}
 	header, body := fakeCallback(t, tu.Reference, payments.OutcomePaid, 1000)
-	if _, _, err := svc.SettleCallback(t.Context(), header, body); err != nil {
+	if _, _, err := svc.SettleCallback(t.Context(), "stripe", header, body); err != nil {
 		t.Fatalf("first settle: %v", err)
 	}
 
 	// Gateways retry webhooks; the same callback may arrive any number of
 	// times. Each replay answers idempotently and credits nothing.
 	for i := range 3 {
-		got, result, err := svc.SettleCallback(t.Context(), header, body)
+		got, result, err := svc.SettleCallback(t.Context(), "stripe", header, body)
 		if err != nil {
 			t.Fatalf("replay %d: %v", i, err)
 		}
@@ -307,7 +315,7 @@ func TestForgedCallbacksAreRejectedBeforeSettlement(t *testing.T) {
 	body, _ := json.Marshal(callbackDoc{Reference: tu.Reference, Outcome: "paid", AmountMinor: 1000})
 	header := http.Header{}
 	header.Set("X-Fake-Signature", "forged")
-	if _, _, err := svc.SettleCallback(t.Context(), header, body); !errors.Is(err, payments.ErrCallbackRejected) {
+	if _, _, err := svc.SettleCallback(t.Context(), "stripe", header, body); !errors.Is(err, payments.ErrCallbackRejected) {
 		t.Fatalf("forged callback error = %v, want ErrCallbackRejected", err)
 	}
 	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 0 {
@@ -317,7 +325,7 @@ func TestForgedCallbacksAreRejectedBeforeSettlement(t *testing.T) {
 	// A real callback after the forgery still settles normally — the
 	// forgery never touched the top-up's state.
 	goodHeader, goodBody := fakeCallback(t, tu.Reference, payments.OutcomePaid, 1000)
-	if _, _, err := svc.SettleCallback(t.Context(), goodHeader, goodBody); err != nil {
+	if _, _, err := svc.SettleCallback(t.Context(), "stripe", goodHeader, goodBody); err != nil {
 		t.Fatalf("settle after forgery: %v", err)
 	}
 	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 10*credits.MicrosPerCredit {
@@ -335,7 +343,7 @@ func TestCallbackAmountMismatchIsRefused(t *testing.T) {
 	// The gateway reports a different amount than the session was opened
 	// for: refuse, credit nothing, leave the top-up pending.
 	header, body := fakeCallback(t, tu.Reference, payments.OutcomePaid, 9999)
-	if _, _, err := svc.SettleCallback(t.Context(), header, body); !errors.Is(err, payments.ErrAmountMismatch) {
+	if _, _, err := svc.SettleCallback(t.Context(), "stripe", header, body); !errors.Is(err, payments.ErrAmountMismatch) {
 		t.Fatalf("mismatched callback error = %v, want ErrAmountMismatch", err)
 	}
 	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 0 {
@@ -348,7 +356,7 @@ func TestCallbackAmountMismatchIsRefused(t *testing.T) {
 
 	// The honest callback then settles.
 	header, body = fakeCallback(t, tu.Reference, payments.OutcomePaid, 1000)
-	if _, _, err := svc.SettleCallback(t.Context(), header, body); err != nil {
+	if _, _, err := svc.SettleCallback(t.Context(), "stripe", header, body); err != nil {
 		t.Fatalf("settle after mismatch: %v", err)
 	}
 }
@@ -357,10 +365,10 @@ func TestUnknownReferenceAndUnverifiableBodyAreRefused(t *testing.T) {
 	svc, _, _, ledger := newService(t)
 
 	header, body := fakeCallback(t, "cs_unknown", payments.OutcomePaid, 1000)
-	if _, _, err := svc.SettleCallback(t.Context(), header, body); !errors.Is(err, payments.ErrNotFound) {
+	if _, _, err := svc.SettleCallback(t.Context(), "stripe", header, body); !errors.Is(err, payments.ErrNotFound) {
 		t.Errorf("unknown reference = %v, want ErrNotFound", err)
 	}
-	if _, _, err := svc.SettleCallback(t.Context(), header, []byte("not json")); !errors.Is(err, payments.ErrCallbackRejected) {
+	if _, _, err := svc.SettleCallback(t.Context(), "stripe", header, []byte("not json")); !errors.Is(err, payments.ErrCallbackRejected) {
 		t.Errorf("garbage body = %v, want ErrCallbackRejected", err)
 	}
 	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 0 {
@@ -379,11 +387,11 @@ func TestPaidCallbackAfterTerminalStateIsRefusedLoudly(t *testing.T) {
 	// order async pair): the failure was terminal, the paid callback must
 	// not resurrect the payment — refuse loudly, credit nothing.
 	failedHeader, failedBody := fakeCallback(t, tu.Reference, payments.OutcomeFailed, 1000)
-	if _, _, err := svc.SettleCallback(t.Context(), failedHeader, failedBody); err != nil {
+	if _, _, err := svc.SettleCallback(t.Context(), "stripe", failedHeader, failedBody); err != nil {
 		t.Fatalf("fail: %v", err)
 	}
 	paidHeader, paidBody := fakeCallback(t, tu.Reference, payments.OutcomePaid, 1000)
-	if _, _, err := svc.SettleCallback(t.Context(), paidHeader, paidBody); !errors.Is(err, payments.ErrAlreadyTerminal) {
+	if _, _, err := svc.SettleCallback(t.Context(), "stripe", paidHeader, paidBody); !errors.Is(err, payments.ErrAlreadyTerminal) {
 		t.Errorf("paid-after-failed = %v, want ErrAlreadyTerminal", err)
 	}
 	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 0 {
@@ -406,7 +414,7 @@ func TestConcurrentSettlementsCreditExactlyOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, err := svc.SettleCallback(t.Context(), header, body)
+			_, _, err := svc.SettleCallback(t.Context(), "stripe", header, body)
 			results <- err
 		}()
 	}
@@ -462,4 +470,148 @@ func TestHistoryReturnsNewestFirst(t *testing.T) {
 	if history[0].Reference != refs[len(refs)-1] {
 		t.Errorf("newest = %q, want %q", history[0].Reference, refs[len(refs)-1])
 	}
+}
+
+// --- Ticket 18: a provider switch must not strand outstanding top-ups ---
+
+// TestSettleCallbackUsesTheCallbackProviderNotTheCurrentConfig drives the
+// retention contract: a top-up opened under paypal settles even after the
+// platform's current config says stripe — the callback names its provider
+// and the service verifies against that provider's retained config.
+func TestSettleCallbackUsesTheCallbackProviderNotTheCurrentConfig(t *testing.T) {
+	svc, _, store, ledger := newService(t)
+
+	// Top-up opened while paypal was configured.
+	if err := store.SaveConfig(t.Context(), paypalCfg); err != nil {
+		t.Fatalf("save paypal config: %v", err)
+	}
+	tu, err := svc.Initiate(t.Context(), consumerID, 1000, "eur")
+	if err != nil {
+		t.Fatalf("Initiate: %v", err)
+	}
+
+	// The platform switches to stripe. If verification used the current
+	// config, this callback would be untestable and the money stranded.
+	if err := store.SaveConfig(t.Context(), stripeCfg()); err != nil {
+		t.Fatalf("save stripe config: %v", err)
+	}
+
+	header, body := fakeCallback(t, tu.Reference, payments.OutcomePaid, 1000)
+	got, result, err := svc.SettleCallback(t.Context(), "paypal", header, body)
+	if err != nil {
+		t.Fatalf("SettleCallback after switch: %v", err)
+	}
+	if result != payments.SettledNow || got.Status != payments.StatusSettled {
+		t.Errorf("settlement = (%q, %s), want settled", result, got.Status)
+	}
+	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 10*credits.MicrosPerCredit {
+		t.Errorf("balance = %d, want 10 credits — the switch must not strand the top-up", bal)
+	}
+}
+
+// TestSettleCallbackRefusesProviderThePlatformNeverKnew pins the 404 path:
+// a callback claiming a provider with no retained config is refused before
+// any verification work — the webhook can answer 404.
+func TestSettleCallbackRefusesProviderThePlatformNeverKnew(t *testing.T) {
+	svc, _, _, ledger := newService(t)
+
+	header, body := fakeCallback(t, "cs_test", payments.OutcomePaid, 1000)
+	if _, _, err := svc.SettleCallback(t.Context(), "unheardof", header, body); !errors.Is(err, payments.ErrUnknownProvider) {
+		t.Fatalf("unknown provider = %v, want ErrUnknownProvider", err)
+	}
+	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 0 {
+		t.Errorf("balance = %d, want 0", bal)
+	}
+}
+
+// TestSettleCallbackRefusesProviderMismatch pins the cross-check: a verified
+// callback whose URL provider disagrees with the top-up's own provider
+// column refuses without touching state — the two must name the same
+// gateway or the reference is being spoofed across gateways.
+func TestSettleCallbackRefusesProviderMismatch(t *testing.T) {
+	svc, _, store, ledger := newService(t)
+	tu, err := svc.Initiate(t.Context(), consumerID, 1000, "eur") // provider: stripe
+	if err != nil {
+		t.Fatalf("Initiate: %v", err)
+	}
+
+	// Both providers retained, both share the fake — only the mismatch
+	// check stands between this callback and a settlement.
+	if err := store.SaveConfig(t.Context(), paypalCfg); err != nil {
+		t.Fatalf("save paypal config: %v", err)
+	}
+
+	header, body := fakeCallback(t, tu.Reference, payments.OutcomePaid, 1000)
+	if _, _, err := svc.SettleCallback(t.Context(), "paypal", header, body); !errors.Is(err, payments.ErrProviderMismatch) {
+		t.Fatalf("provider mismatch = %v, want ErrProviderMismatch", err)
+	}
+	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 0 {
+		t.Errorf("balance = %d after mismatch, want 0", bal)
+	}
+	// The top-up stays pending — a corrected callback can still settle it.
+	stored, err := store.ByReference(t.Context(), tu.Reference)
+	if err != nil || stored.Status != payments.StatusPending {
+		t.Errorf("top-up after mismatch = (%+v, %v), want still pending", stored, err)
+	}
+}
+
+// TestRetainedConfigsSurviveDisableAndSwitch drives the store contract the
+// settlement path leans on: each provider's last config stays readable by
+// provider name through switches and a full disable.
+func TestRetainedConfigsSurviveDisableAndSwitch(t *testing.T) {
+	_, _, store, _ := newService(t)
+	ctx := t.Context()
+
+	// A provider the platform never knew has nothing retained. (The shared
+	// store arrives pre-seeded with stripe, so this checks a fresh one.)
+	if _, err := payments.NewMemoryStore(credits.NewMemoryStore()).ConfigByProvider(ctx, "paypal"); !errors.Is(err, payments.ErrNotFound) {
+		t.Errorf("never-configured provider ConfigByProvider = %v, want ErrNotFound", err)
+	}
+
+	if err := store.SaveConfig(ctx, stripeCfg()); err != nil {
+		t.Fatalf("save stripe: %v", err)
+	}
+	if err := store.SaveConfig(ctx, paypalCfg); err != nil {
+		t.Fatalf("save paypal: %v", err)
+	}
+	// Disable the gateway entirely (the admin path clears the current row).
+	if err := store.SaveConfig(ctx, payments.Config{}); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	// Current config: disabled. Retained: both providers still settle-able.
+	cfg, err := store.LoadConfig(ctx)
+	if err != nil || cfg.Enabled() {
+		t.Errorf("LoadConfig after disable = (%+v, %v), want disabled", cfg, err)
+	}
+	for provider, wantSecret := range map[string]string{"stripe": "whsec_test", "paypal": "whsec_paypal"} {
+		got, err := store.ConfigByProvider(ctx, provider)
+		if err != nil {
+			t.Fatalf("ConfigByProvider(%s): %v", provider, err)
+		}
+		if got.Provider != provider || got.WebhookSecret != wantSecret {
+			t.Errorf("retained %s = (%s/%s), want provider kept and secret %s", provider, got.Provider, got.WebhookSecret, wantSecret)
+		}
+	}
+}
+
+// stripeCfg mirrors testConfigLoader as a plain value — the switch tests
+// save configs directly through the store, which takes a Config, not a loader.
+func stripeCfg() payments.Config {
+	cfg, err := testConfigLoader(context.Background())
+	if err != nil {
+		panic(err) // the loader is a fixture; it cannot fail
+	}
+	return cfg
+}
+
+// paypalCfg is the second provider's configuration: same shape, its own
+// secret — proof that retention is per provider, not one shared row.
+var paypalCfg = payments.Config{
+	Provider:      "paypal",
+	APIKey:        "pp_test",
+	WebhookSecret: "whsec_paypal",
+	Currency:      "eur",
+	MicrosPerCent: 10_000,
+	ReturnBaseURL: "https://thresh.example",
 }

@@ -24,8 +24,11 @@ import {
 } from "~/taxonomy";
 import {
   fetchGatewayConfig,
+  fetchPendingTopUps,
   saveGatewayConfig,
+  formatMinor,
   type GatewayConfig,
+  type PendingTopUpRow,
 } from "~/payments";
 import {
   createMemoryProvider,
@@ -87,6 +90,12 @@ const gatewayMicrosPerCent = ref<number | null>(null);
 const gatewayError = ref<string | null>(null);
 const gatewayNotice = ref<string | null>(null);
 
+// Stranded-session watch (ticket 18): pending top-ups older than a day,
+// listed so a provider switch or disable never goes silent. Fresh sessions
+// (still mid-checkout) stay off the list — that's the age floor's job.
+const pendingTopUps = ref<PendingTopUpRow[]>([]);
+const pendingError = ref<string | null>(null);
+
 // Memory Provider registry state (ticket 14): the external recall services
 // the agent dials over MCP — connection facts only.
 const providers = ref<MemoryProvider[]>([]);
@@ -117,6 +126,7 @@ watch(ready, (isReady) => {
     loadPricing();
     loadTerms();
     loadGateway();
+    loadPendingTopUps();
     loadProviders();
   }
 });
@@ -228,6 +238,22 @@ async function disableGateway() {
     gatewayNotice.value = "Gateway disabled — top-ups are off.";
   } catch (e) {
     gatewayError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+  // The disable (or switch) is exactly when stranded sessions matter —
+  // refresh the watch with it.
+  loadPendingTopUps();
+}
+
+// loadPendingTopUps reads the stranded-session list (ticket 18): pending
+// top-ups older than 24h, oldest first. A failed load must not break the
+// gateway form — the two sections are independent.
+async function loadPendingTopUps() {
+  if (!token.value) return;
+  pendingError.value = null;
+  try {
+    pendingTopUps.value = await fetchPendingTopUps(backendURL, token.value, 24);
+  } catch (e) {
+    pendingError.value = e instanceof Error ? e.message : errFrom(e);
   }
 }
 
@@ -700,6 +726,7 @@ async function submitDeleteTerm(t: Term) {
             <span v-if="gateway.apiKeySet" class="hint"> · API key set</span>
             <span v-if="gateway.webhookSecretSet" class="hint"> · webhook secret set</span>
           </p>
+
           <form @submit.prevent="submitGateway">
             <label>
               Provider
@@ -744,6 +771,30 @@ async function submitDeleteTerm(t: Term) {
             </div>
           </form>
         </template>
+
+        <!-- Stranded sessions (ticket 18): pending top-ups a provider switch
+             or disable may have left behind. Visible, never silent — and
+             outside the gateway v-if, so it renders even when the gateway
+             is disabled or its config fetch failed. -->
+        <h4>Outstanding top-ups (older than 24h)</h4>
+        <p v-if="pendingError" class="error-text">{{ pendingError }}</p>
+        <template v-if="pendingTopUps.length > 0">
+          <p class="warn-text">
+            {{ pendingTopUps.length }} pending top-up{{ pendingTopUps.length === 1 ? "" : "s" }} —
+            outstanding checkout{{ pendingTopUps.length === 1 ? "" : "s" }} that may still settle
+            through {{ pendingTopUps.length === 1 ? "its" : "their" }} provider's callback.
+          </p>
+          <ul class="term-list">
+            <li v-for="p in pendingTopUps" :key="p.id">
+              <strong>{{ formatMinor(p.amountMinor, p.currency) }}</strong>
+              <span class="hint">
+                — via {{ p.provider }} · {{ new Date(p.createdAt).toLocaleString() }} · ref
+                <code>{{ p.reference.slice(0, 16) }}…</code>
+              </span>
+            </li>
+          </ul>
+        </template>
+        <p v-else-if="!pendingError" class="hint">None — no checkout is left hanging.</p>
       </section>
 
       <!-- Memory providers (ticket 14): external recall services the agent

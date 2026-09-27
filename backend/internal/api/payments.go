@@ -4,7 +4,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/payments"
 )
@@ -37,6 +39,7 @@ func (h *Handler) registerPaymentsRoutes(deps *PaymentsDeps) {
 	h.mux.HandleFunc("POST /api/v1/admin/payments/config", h.handleSaveGatewayConfig)
 	h.mux.HandleFunc("POST /api/v1/me/topups", h.handleInitiateTopUp)
 	h.mux.HandleFunc("GET /api/v1/me/topups", h.handleMyTopUps)
+	h.mux.HandleFunc("GET /api/v1/admin/payments/pending", h.handleAdminPendingTopUps)
 	h.mux.HandleFunc("POST /api/v1/payments/callback/{provider}", h.handlePaymentCallback)
 }
 
@@ -188,30 +191,61 @@ func (h *Handler) handleMyTopUps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"top_ups": tops})
 }
 
+// handleAdminPendingTopUps lists pending top-ups older than the requested
+// age (default 24h) — the stranded-session view of ticket 18. A provider
+// switch or disable can leave verified callbacks unable to settle; this
+// makes such sessions visible to the Platform Admin rather than silent.
+func (h *Handler) handleAdminPendingTopUps(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireAdmin(w, r); !ok {
+		return
+	}
+	age := 24 * time.Hour
+	if v := r.URL.Query().Get("older_than_hours"); v != "" {
+		hours, err := strconv.ParseFloat(v, 64)
+		if err != nil || hours < 0 || hours > 24*365 {
+			apiError(w, http.StatusUnprocessableEntity, "older_than_hours must be a number between 0 and 8760")
+			return
+		}
+		age = time.Duration(hours * float64(time.Hour))
+	}
+	tops, err := h.payments.service.PendingOlderThan(r.Context(), age, 200)
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "failed to load pending top-ups")
+		return
+	}
+	if tops == nil {
+		tops = []payments.TopUp{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"pending_top_ups": tops})
+}
+
 // handlePaymentCallback is the gateway webhook: verify the signature
-// before trusting anything, then settle. Forged callbacks get 400 with no
-// state change; verified settlements 200; Stripe's verified-but-irrelevant
+// before trusting anything, then settle. The URL's provider picks the
+// retained configuration the callback is verified with (ticket 18): a
+// provider the platform never configured 404s before verification work;
+// a previously-known provider still settles its outstanding sessions even
+// after a switch or disable. Forged callbacks get 400 with no state
+// change; verified settlements 200; Stripe's verified-but-irrelevant
 // events also 200 so it stops retrying them.
 func (h *Handler) handlePaymentCallback(w http.ResponseWriter, r *http.Request) {
 	provider := r.PathValue("provider")
-	if provider != h.payments.service.ProviderName() {
-		apiError(w, http.StatusNotFound, "no such payment provider")
-		return
-	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		apiError(w, http.StatusBadRequest, "unreadable callback body")
 		return
 	}
-	_, result, err := h.payments.service.SettleCallback(r.Context(), r.Header, body)
+	_, result, err := h.payments.service.SettleCallback(r.Context(), provider, r.Header, body)
 	switch {
+	case errors.Is(err, payments.ErrUnknownProvider):
+		apiError(w, http.StatusNotFound, "no such payment provider")
 	case errors.Is(err, payments.ErrCallbackRejected):
 		apiError(w, http.StatusBadRequest, "callback verification failed")
 	case errors.Is(err, payments.ErrNotFound):
 		apiError(w, http.StatusNotFound, "no top-up for this reference")
 	case payments.IsUnhandledEvent(err):
 		writeJSON(w, http.StatusOK, map[string]any{"handled": false})
-	case errors.Is(err, payments.ErrAmountMismatch), errors.Is(err, payments.ErrAlreadyTerminal):
+	case errors.Is(err, payments.ErrAmountMismatch), errors.Is(err, payments.ErrAlreadyTerminal),
+		errors.Is(err, payments.ErrProviderMismatch):
 		// A verified callback we refuse: 409 so the operator's monitoring
 		// sees it, but the top-up's state answers idempotent retries.
 		apiError(w, http.StatusConflict, err.Error())

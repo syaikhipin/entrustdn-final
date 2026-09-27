@@ -24,6 +24,12 @@ type TopUpStore interface {
 	// LoadConfig returns the stored configuration; a disabled platform
 	// (no row) returns a zero Config and no error.
 	LoadConfig(ctx context.Context) (Config, error)
+	// ConfigByProvider returns the last configuration saved for the named
+	// provider, even after a switch or a disable (ticket 18): a previously
+	// known provider's webhook secret stays available, so its outstanding
+	// sessions can still be verified and settled.
+	//   - provider never configured → ErrNotFound
+	ConfigByProvider(ctx context.Context, provider string) (Config, error)
 
 	// Create inserts a pending top-up. The generated ID and timestamps
 	// fill the returned copy.
@@ -32,6 +38,10 @@ type TopUpStore interface {
 	ByReference(ctx context.Context, reference string) (TopUp, error)
 	// History returns the account's top-ups, newest first.
 	History(ctx context.Context, accountID string, limit int) ([]TopUp, error)
+	// PendingOlderThan returns pending top-ups created before the cutoff,
+	// oldest first (ticket 18): the admin's view of sessions a provider
+	// switch or disable may have stranded.
+	PendingOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]TopUp, error)
 
 	// SettlePaid claims the top-up as settled and records the movement the
 	// post callback builds — atomically with the claim. The callback is
@@ -94,6 +104,7 @@ type MemoryStore struct {
 	ledger CreditLedger
 	nextID int
 	config Config
+	byProv map[string]Config // ticket 18: last config per provider, retained
 	byRef  map[string]*TopUp
 	order  []string // references in creation order
 }
@@ -103,14 +114,19 @@ var _ TopUpStore = (*MemoryStore)(nil)
 
 // NewMemoryStore returns an empty store whose settlements post to ledger.
 func NewMemoryStore(ledger CreditLedger) *MemoryStore {
-	return &MemoryStore{ledger: ledger, byRef: map[string]*TopUp{}}
+	return &MemoryStore{ledger: ledger, byProv: map[string]Config{}, byRef: map[string]*TopUp{}}
 }
 
-// SaveConfig upserts the single config row.
+// SaveConfig upserts the single config row and retains it per provider:
+// a zero Config clears the current row (disabled) but leaves every
+// provider's last-known configuration settle-able.
 func (m *MemoryStore) SaveConfig(_ context.Context, cfg Config) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.config = cfg
+	if cfg.Provider != "" {
+		m.byProv[cfg.Provider] = cfg
+	}
 	return nil
 }
 
@@ -119,6 +135,17 @@ func (m *MemoryStore) LoadConfig(_ context.Context) (Config, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.config, nil
+}
+
+// ConfigByProvider returns the provider's last saved configuration.
+func (m *MemoryStore) ConfigByProvider(_ context.Context, provider string) (Config, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfg, ok := m.byProv[provider]
+	if !ok {
+		return Config{}, fmt.Errorf("%w: %s", ErrUnknownProvider, provider)
+	}
+	return cfg, nil
 }
 
 // Create inserts a pending top-up.
@@ -158,6 +185,24 @@ func (m *MemoryStore) History(_ context.Context, accountID string, limit int) ([
 	var out []TopUp
 	for i := len(m.order) - 1; i >= 0 && len(out) < limit; i-- {
 		if tu := m.byRef[m.order[i]]; tu.AccountID == accountID {
+			out = append(out, *tu)
+		}
+	}
+	return out, nil
+}
+
+// PendingOlderThan returns pending top-ups created before the cutoff,
+// oldest first.
+func (m *MemoryStore) PendingOlderThan(_ context.Context, cutoff time.Time, limit int) ([]TopUp, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []TopUp
+	for _, ref := range m.order { // creation order = oldest first
+		tu := m.byRef[ref]
+		if len(out) >= limit {
+			break
+		}
+		if tu.Status == StatusPending && tu.CreatedAt.Before(cutoff) {
 			out = append(out, *tu)
 		}
 	}

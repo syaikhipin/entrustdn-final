@@ -104,7 +104,7 @@ Converting external money into Credits through the connected Payment Gateway.
 _Avoid_: deposit, recharge
 
 **Payment Gateway**:
-An admin-configured external payment service (e.g. Stripe, PayPal) connected by API key. Platform configuration, not a user-uploadable Module.
+An admin-configured external payment service (e.g. Stripe, PayPal) connected by API key. Platform configuration, not a user-uploadable Module. Switching or disabling it never strands outstanding Top-ups: the last configuration of every provider is retained, so its verified callbacks still settle against the Top-up's own provider record.
 _Avoid_: payment provider, PSP
 
 **Ledger**:

@@ -2,7 +2,13 @@
 // shapes and formatMinor pins the money rendering. Documents are exactly as
 // the Go backend serializes them — snake_case, masked credentials.
 import { describe, expect, it } from "vitest";
-import { formatMinor, parseGatewayConfig, parseTopUp, topUpStatusLabel } from "./payments";
+import {
+  formatMinor,
+  parseGatewayConfig,
+  parsePendingTopUpRow,
+  parseTopUp,
+  topUpStatusLabel,
+} from "./payments";
 
 // The masked config document as the backend renders it: credential VALUES
 // never appear — only *_set flags.
@@ -117,5 +123,51 @@ describe("topUpStatusLabel", () => {
     expect(topUpStatusLabel("settled")).toBe("Settled");
     expect(topUpStatusLabel("failed")).toBe("Failed");
     expect(topUpStatusLabel("cancelled")).toBe("Cancelled");
+  });
+});
+
+describe("parsePendingTopUpRow", () => {
+  // One stranded session as the admin list returns it (ticket 18): no
+  // payment_url or movement fields — just identification and money facts.
+  const pendingRowDoc = {
+    id: "tu_stranded",
+    account_id: "acct-9",
+    reference: "cs_test_456",
+    provider: "stripe",
+    amount_minor: 2500,
+    currency: "eur",
+    credits_micros: 25_000_000,
+    status: "pending",
+    created_at: "2026-09-26T10:00:00Z",
+    updated_at: "2026-09-26T10:00:00Z",
+  };
+
+  it("reads the identification and money facts", () => {
+    const row = parsePendingTopUpRow(pendingRowDoc);
+    expect(row).toEqual({
+      id: "tu_stranded",
+      accountId: "acct-9",
+      reference: "cs_test_456",
+      provider: "stripe",
+      amountMinor: 2500,
+      currency: "eur",
+      createdAt: "2026-09-26T10:00:00Z",
+    });
+  });
+
+  it("refuses a row without a reference", () => {
+    expect(() => parsePendingTopUpRow({ ...pendingRowDoc, reference: "" })).toThrow(/no reference/);
+  });
+
+  it("refuses a row without an id", () => {
+    expect(() => parsePendingTopUpRow({ ...pendingRowDoc, id: "" })).toThrow(/no id/);
+  });
+
+  it("refuses a non-integer amount", () => {
+    expect(() => parsePendingTopUpRow({ ...pendingRowDoc, amount_minor: 25.5 })).toThrow(/not an integer/);
+  });
+
+  it("refuses a non-object", () => {
+    expect(() => parsePendingTopUpRow("pending")).toThrow(/not an object/);
   });
 });

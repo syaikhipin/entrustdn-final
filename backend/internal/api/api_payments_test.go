@@ -78,8 +78,8 @@ func newPaymentsServer(t *testing.T, gw payments.Gateway) (*httptest.Server, str
 		Store:   memStore,
 		Mail:    mailsink.NewLogSink(mail),
 		Credits: &api.CreditsDeps{
-			Store: ledger,
-			Rules: func(context.Context) (credits.PricingRules, error) { return testPricingRules(), nil },
+			Store:     ledger,
+			Rules:     func(context.Context) (credits.PricingRules, error) { return testPricingRules(), nil },
 			SaveRules: func(context.Context, credits.PricingRules) error { return nil },
 		},
 		Payments: &api.PaymentsDeps{Service: paySvc, PublicBaseURL: "https://thresh.example"},
@@ -365,4 +365,116 @@ func newConsumerSecond(t *testing.T, srv *httptest.Server, mail *bytes.Buffer) s
 	t.Helper()
 	_, token := newConsumer(t, srv, mail, "down-gateway@example.org")
 	return token
+}
+
+// --- Ticket 18: the admin sees stranded sessions before they go silent ---
+
+// TestProviderSwitchDoesNotStrandOutstandingTopUps is the issue's exact
+// scenario, end to end: top-up initiated under the gateway, the gateway
+// then disabled (the config row cleared mid-flight), and the consumer
+// completing payment afterwards — the callback must still verify against
+// the retained config and settle, credited exactly once.
+func TestProviderSwitchDoesNotStrandOutstandingTopUps(t *testing.T) {
+	srv, adminToken, mail, ledger := newPaymentsServer(t, &fakeCallbackGateway{})
+	consumerID, consumerToken := newConsumer(t, srv, mail, "switching@example.org")
+	enableGateway(t, srv, adminToken)
+
+	code, doc := postWithToken(t, srv, "/api/v1/me/topups", consumerToken, map[string]any{"amount_minor": 2500})
+	if code != http.StatusCreated {
+		t.Fatalf("initiate: %d (doc: %v)", code, doc)
+	}
+	ref := doc["top_up"].(map[string]any)["reference"].(string)
+
+	// Disable the gateway: the current config row clears mid-flight.
+	code, _ = postWithToken(t, srv, "/api/v1/admin/payments/config", adminToken, map[string]any{
+		"provider": "", "currency": "", "micros_per_cent": 0,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("disable: %d", code)
+	}
+
+	// Initiation is now refused (top-ups off) but the old callback settles.
+	code, _ = postWithToken(t, srv, "/api/v1/me/topups", consumerToken, map[string]any{"amount_minor": 1000})
+	if code != http.StatusConflict {
+		t.Errorf("initiate while disabled = %d, want 409", code)
+	}
+	h, body := fakeCallbackBody(t, ref, "paid", 2500)
+	code, doc = postRaw(t, srv, "/api/v1/payments/callback/fakepay", *h, body)
+	if code != http.StatusOK {
+		t.Fatalf("callback after disable = %d (doc: %v), want 200 — the disable must not strand it", code, doc)
+	}
+
+	// The credit landed exactly once, and a replay after all this credits
+	// nothing more.
+	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 25*credits.MicrosPerCredit {
+		t.Errorf("balance = %d, want exactly 25 credits", bal)
+	}
+	h, body = fakeCallbackBody(t, ref, "paid", 2500)
+	if code, _ := postRaw(t, srv, "/api/v1/payments/callback/fakepay", *h, body); code != http.StatusOK {
+		t.Errorf("replay = %d, want 200", code)
+	}
+	if bal, _ := ledger.Balance(t.Context(), credits.AccountScope(consumerID)); bal != 25*credits.MicrosPerCredit {
+		t.Errorf("balance after replay = %d, want exactly 25 credits", bal)
+	}
+}
+
+// TestAdminPendingTopUpsSurfacesStrandedSessions drives the detection
+// surface: pending top-ups older than the requested age appear with their
+// provider and reference; settled/terminal ones never do; consumers and
+// the anonymous get nothing.
+func TestAdminPendingTopUpsSurfacesStrandedSessions(t *testing.T) {
+	srv, adminToken, mail, _ := newPaymentsServer(t, &fakeCallbackGateway{})
+	consumerID, consumerToken := newConsumer(t, srv, mail, "stranded@example.org")
+	enableGateway(t, srv, adminToken)
+
+	// Three top-ups: one settles, one fails, one stays pending (stranded).
+	initiate := func() string {
+		code, doc := postWithToken(t, srv, "/api/v1/me/topups", consumerToken, map[string]any{"amount_minor": 1000})
+		if code != http.StatusCreated {
+			t.Fatalf("initiate: %d (doc: %v)", code, doc)
+		}
+		return doc["top_up"].(map[string]any)["reference"].(string)
+	}
+	settledRef, failedRef, pendingRef := initiate(), initiate(), initiate()
+	for _, tt := range []struct{ ref, outcome string }{
+		{settledRef, "paid"}, {failedRef, "failed"},
+	} {
+		h, body := fakeCallbackBody(t, tt.ref, tt.outcome, 1000)
+		if code, doc := postRaw(t, srv, "/api/v1/payments/callback/fakepay", *h, body); code != http.StatusOK {
+			t.Fatalf("callback %s = %d (doc: %v)", tt.outcome, code, doc)
+		}
+	}
+
+	// With a zero age floor, the one pending top-up shows (the default 24h
+	// floor intentionally keeps fresh checkout sessions off this list).
+	code, doc := getWithToken(t, srv, "/api/v1/admin/payments/pending?older_than_hours=0", adminToken)
+	if code != http.StatusOK {
+		t.Fatalf("pending list = %d (doc: %v)", code, doc)
+	}
+	tops := doc["pending_top_ups"].([]any)
+	if len(tops) != 1 {
+		t.Fatalf("pending list = %v, want exactly the one stranded top-up", tops)
+	}
+	row := tops[0].(map[string]any)
+	if row["reference"] != pendingRef || row["status"] != "pending" {
+		t.Errorf("pending row = %v, want reference %s pending", row, pendingRef)
+	}
+	if row["provider"] != "fakepay" || row["account_id"] != consumerID {
+		t.Errorf("pending row = %v, want provider fakepay and the consumer's id", row)
+	}
+
+	// An age filter beyond a year refuses; a year hides it: nothing is
+	// 8760 hours old.
+	if code, _ := getWithToken(t, srv, "/api/v1/admin/payments/pending?older_than_hours=99999", adminToken); code != http.StatusUnprocessableEntity {
+		t.Errorf("absurd age = %d, want 422", code)
+	}
+	code, doc = getWithToken(t, srv, "/api/v1/admin/payments/pending?older_than_hours=8760", adminToken)
+	if code != http.StatusOK || len(doc["pending_top_ups"].([]any)) != 0 {
+		t.Errorf("aged pending list = (%d, %v), want empty", code, doc["pending_top_ups"])
+	}
+
+	// Consumers never see the admin surface.
+	if code, _ := getWithToken(t, srv, "/api/v1/admin/payments/pending", consumerToken); code != http.StatusForbidden {
+		t.Errorf("consumer pending list = %d, want 403", code)
+	}
 }

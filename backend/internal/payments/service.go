@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 )
@@ -130,15 +131,31 @@ const (
 )
 
 // SettleCallback verifies, claims, and settles one gateway callback. The
-// pipeline is: ParseCallback (signature verification — forged payloads die
-// here, state untouched) → SettlePaid / MarkTerminal (atomic claim; the
-// amount match runs inside the claim, so state cannot move between check
-// and post; replays answer idempotently; contradictions refuse loudly).
-// Only the claim winner's transaction records the Ledger movement.
-func (s *Service) SettleCallback(ctx context.Context, header http.Header, body []byte) (TopUp, SettlementResult, error) {
-	cb, err := s.parseCallback(ctx, header, body)
+// pipeline is: ConfigByProvider (the callback's own provider, not the
+// current config — a switch or disable must not strand outstanding
+// sessions, ticket 18) → ParseCallback (signature verification — forged
+// payloads die here, state untouched) → provider cross-check against the
+// top-up's own column (a reference walked across gateways refuses) →
+// SettlePaid / MarkTerminal (atomic claim; the amount match runs inside
+// the claim, so state cannot move between check and post; replays answer
+// idempotently; contradictions refuse loudly). Only the claim winner's
+// transaction records the Ledger movement.
+func (s *Service) SettleCallback(ctx context.Context, provider string, header http.Header, body []byte) (TopUp, SettlementResult, error) {
+	cb, err := s.parseCallback(ctx, provider, header, body)
 	if err != nil {
 		return TopUp{}, "", err
+	}
+
+	// The cross-check reads before settling. A top-up's provider is fixed
+	// at initiation and never updated, so no race exists between this read
+	// and the claim below; the claim itself stays the money-safety point.
+	tu, err := s.store.ByReference(ctx, cb.Reference)
+	if err != nil {
+		return TopUp{}, "", fmt.Errorf("%w: reference %s", ErrNotFound, cb.Reference)
+	}
+	if tu.Provider != provider {
+		return TopUp{}, "", fmt.Errorf("%w: callback via %s, top-up opened via %s",
+			ErrProviderMismatch, provider, tu.Provider)
 	}
 
 	switch cb.Outcome {
@@ -197,14 +214,18 @@ func (s *Service) SettleCallback(ctx context.Context, header http.Header, body [
 	}
 }
 
-func (s *Service) parseCallback(ctx context.Context, header http.Header, body []byte) (Callback, error) {
-	cfg, err := s.config(ctx)
+func (s *Service) parseCallback(ctx context.Context, provider string, header http.Header, body []byte) (Callback, error) {
+	// Ticket 18: verify with the callback's own provider's retained config,
+	// not the current one — a provider switch or disable leaves the old
+	// gateway's outstanding sessions settle-able. A never-configured
+	// provider refuses before any verification work (the webhook 404s it).
+	cfg, err := s.store.ConfigByProvider(ctx, provider)
 	if err != nil {
-		return Callback{}, fmt.Errorf("payments: load config: %w", err)
+		return Callback{}, fmt.Errorf("payments: load retained config: %w", err)
 	}
 	gw, err := s.gateway(cfg)
 	if err != nil {
-		return Callback{}, fmt.Errorf("payments: build gateway: %w", err)
+		return Callback{}, fmt.Errorf("payments: build gateway %s: %w", provider, err)
 	}
 	cb, err := gw.ParseCallback(ctx, header, body)
 	if err != nil {
@@ -254,6 +275,21 @@ func (s *Service) History(ctx context.Context, accountID string, limit int) ([]T
 	return tops, nil
 }
 
+// PendingOlderThan returns pending top-ups older than the given age,
+// oldest first — the admin's stranded-session view (ticket 18). The age
+// floor keeps fresh sessions (still mid-checkout) out of the warning list.
+// The limit is clamped once here; the stores take it as given.
+func (s *Service) PendingOlderThan(ctx context.Context, age time.Duration, limit int) ([]TopUp, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	tops, err := s.store.PendingOlderThan(ctx, time.Now().Add(-age), limit)
+	if err != nil {
+		return nil, fmt.Errorf("payments: load pending top-ups: %w", err)
+	}
+	return tops, nil
+}
+
 // LoadConfigForAdmin returns the raw configuration (unmasked credentials —
 // the admin surface masks before rendering, never stores the mask).
 func (s *Service) LoadConfigForAdmin(ctx context.Context) (Config, error) {
@@ -273,19 +309,10 @@ func (s *Service) SaveConfig(ctx context.Context, cfg Config) error {
 	return s.store.SaveConfig(ctx, cfg)
 }
 
-// Disable clears the gateway configuration: top-ups are off and the
-// webhook answers 404.
+// Disable clears the gateway configuration: top-ups are off. Outstanding
+// sessions of previously-known providers remain settle-able (ticket 18):
+// Disable only clears the current row — the retained per-provider configs
+// keep verifying callbacks until every top-up reaches a terminal state.
 func (s *Service) Disable(ctx context.Context) error {
 	return s.store.SaveConfig(ctx, Config{})
-}
-
-// ProviderName returns the configured provider ("", "stripe", …) — the
-// webhook route checks the URL's provider against it so a callback for an
-// unconfigured gateway reads as 404 before any verification work.
-func (s *Service) ProviderName() string {
-	cfg, err := s.config(context.Background())
-	if err != nil {
-		return ""
-	}
-	return cfg.Provider
 }

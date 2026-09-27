@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -70,6 +71,25 @@ func (s *PaymentsStore) LoadConfig(ctx context.Context) (payments.Config, error)
 	return cfg, nil
 }
 
+// ConfigByProvider returns the last configuration saved for the named
+// provider (ticket 18). The retention trigger on payment_gateway_config
+// keeps the mirror current; a provider never configured reads as
+// ErrNotFound so the webhook can 404 it before verification.
+func (s *PaymentsStore) ConfigByProvider(ctx context.Context, provider string) (payments.Config, error) {
+	var cfg payments.Config
+	err := s.pool.QueryRow(ctx, `
+		SELECT provider, api_key, webhook_secret, currency, micros_per_cent, return_base_url
+		FROM payment_provider_configs WHERE provider = $1`, provider).
+		Scan(&cfg.Provider, &cfg.APIKey, &cfg.WebhookSecret, &cfg.Currency, &cfg.MicrosPerCent, &cfg.ReturnBaseURL)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return payments.Config{}, fmt.Errorf("%w: %s", payments.ErrUnknownProvider, provider)
+	}
+	if err != nil {
+		return payments.Config{}, fmt.Errorf("load retained config for %s: %w", provider, err)
+	}
+	return cfg, nil
+}
+
 // Create inserts a pending top-up.
 func (s *PaymentsStore) Create(ctx context.Context, tu payments.TopUp) (payments.TopUp, error) {
 	if tu.ID == "" {
@@ -117,6 +137,28 @@ func (s *PaymentsStore) History(ctx context.Context, accountID string, limit int
 			"ORDER BY created_at DESC, id DESC LIMIT $2", accountID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list top-ups for %s: %w", accountID, err)
+	}
+	defer rows.Close()
+	var out []payments.TopUp
+	for rows.Next() {
+		tu, err := scanTopUp(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, tu)
+	}
+	return out, rows.Err()
+}
+
+// PendingOlderThan returns pending top-ups created before the cutoff,
+// oldest first (ticket 18's admin detection surface). The service clamps
+// the limit.
+func (s *PaymentsStore) PendingOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]payments.TopUp, error) {
+	rows, err := s.pool.Query(ctx,
+		"SELECT "+topUpColumns+" FROM top_ups WHERE status = 'pending' AND created_at < $1 "+
+			"ORDER BY created_at ASC, id ASC LIMIT $2", cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list pending top-ups older than %s: %w", cutoff.Format(time.RFC3339), err)
 	}
 	defer rows.Close()
 	var out []payments.TopUp

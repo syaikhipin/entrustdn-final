@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/membership"
@@ -238,5 +239,103 @@ func TestStoreTopUpHistoryAndForeignKeys(t *testing.T) {
 	hist, err = ps.History(ctx, "00000000-0000-0000-0000-0000000000aa", 10)
 	if err != nil || len(hist) != 0 {
 		t.Errorf("stranger history = (%d, %v), want empty", len(hist), err)
+	}
+}
+
+// Ticket 18: the retained-config mirror and the pending-top-up sweep.
+
+func TestStoreConfigByProviderRetainsAcrossSwitchAndDisable(t *testing.T) {
+	ps, _, _ := newPaymentsStore(t)
+	ctx := t.Context()
+
+	// Never configured: the 404 path.
+	if _, err := ps.ConfigByProvider(ctx, "stripe"); !errors.Is(err, payments.ErrUnknownProvider) {
+		t.Fatalf("never-configured provider = %v, want ErrUnknownProvider", err)
+	}
+
+	stripe := payments.Config{
+		Provider: "stripe", APIKey: "sk_live_x", WebhookSecret: "whsec_y",
+		Currency: "eur", MicrosPerCent: 10_000, ReturnBaseURL: "https://thresh.example",
+	}
+	if err := ps.SaveConfig(ctx, stripe); err != nil {
+		t.Fatalf("SaveConfig stripe: %v", err)
+	}
+	paypal := stripe
+	paypal.Provider, paypal.APIKey, paypal.WebhookSecret = "paypal", "pp_live", "whsec_pp"
+	if err := ps.SaveConfig(ctx, paypal); err != nil {
+		t.Fatalf("SaveConfig paypal: %v", err)
+	}
+	// Disable: the current row clears, the mirror must not.
+	if err := ps.SaveConfig(ctx, payments.Config{}); err != nil {
+		t.Fatalf("SaveConfig disable: %v", err)
+	}
+
+	cfg, err := ps.LoadConfig(ctx)
+	if err != nil || cfg.Enabled() {
+		t.Errorf("LoadConfig after disable = (%+v, %v), want disabled", cfg, err)
+	}
+	got, err := ps.ConfigByProvider(ctx, "stripe")
+	if err != nil || got != stripe {
+		t.Errorf("retained stripe = (%+v, %v), want %+v", got, err, stripe)
+	}
+	got, err = ps.ConfigByProvider(ctx, "paypal")
+	if err != nil || got != paypal {
+		t.Errorf("retained paypal = (%+v, %v), want %+v", got, err, paypal)
+	}
+
+	// Re-configuring a provider rotates its mirror.
+	rotated := stripe
+	rotated.APIKey = "sk_live_rotated"
+	if err := ps.SaveConfig(ctx, rotated); err != nil {
+		t.Fatalf("SaveConfig rotated stripe: %v", err)
+	}
+	got, _ = ps.ConfigByProvider(ctx, "stripe")
+	if got.APIKey != "sk_live_rotated" {
+		t.Errorf("rotated retained api key = %q, want sk_live_rotated", got.APIKey)
+	}
+}
+
+func TestStorePendingOlderThanSweepsOldestFirst(t *testing.T) {
+	url := skipIfNoDatabase(t)
+	pool := openCleanTestDB(t, url)
+	ps := postgres.NewPaymentsStore(pool)
+
+	// A real account row to satisfy the foreign key.
+	store := postgres.NewStore(pool)
+	acct := membership.Account{
+		Email:       "pending-sweep@example.org",
+		DisplayName: "Pending Sweep",
+		Role:        membership.RoleDataConsumer,
+		Status:      membership.StatusActive,
+	}
+	if err := store.CreateAccount(t.Context(), &acct); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+	ctx := t.Context()
+
+	old, new := seedPending(t, ps, acct.ID, 100, 1*credits.MicrosPerCredit), seedPending(t, ps, acct.ID, 200, 2*credits.MicrosPerCredit)
+	// The seeds land within the same clock tick; force the age gap the
+	// cutoff needs. The pool is in scope here, so raw SQL is available.
+	if _, err := pool.Exec(ctx, "UPDATE top_ups SET created_at = created_at - interval '48 hours' WHERE reference = $1", old.Reference); err != nil {
+		t.Fatalf("age the first top-up: %v", err)
+	}
+	if _, won, err := ps.SettlePaid(ctx, new.Reference, func(tu payments.TopUp) (credits.Movement, error) {
+		return buildMovement(tu, tu.Reference), nil
+	}); err != nil || !won {
+		t.Fatalf("settle the second top-up: (%v, %v)", won, err)
+	}
+
+	got, err := ps.PendingOlderThan(ctx, time.Now().Add(-24*time.Hour), 200)
+	if err != nil {
+		t.Fatalf("PendingOlderThan: %v", err)
+	}
+	if len(got) != 1 || got[0].Reference != old.Reference {
+		t.Errorf("pending = %+v, want exactly the aged %q", got, old.Reference)
+	}
+
+	// A cutoff in the future catches the settled one? No — status gates it.
+	got, err = ps.PendingOlderThan(ctx, time.Now().Add(time.Hour), 200)
+	if err != nil || len(got) != 0 {
+		t.Errorf("future cutoff = (%+v, %v), want empty (settled never lists)", got, err)
 	}
 }

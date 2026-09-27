@@ -204,4 +204,7 @@ button.danger {
   background: #fbe4e1;
   color: var(--danger);
 }
+.warn-text {
+  color: var(--warn);
+}
 </style>

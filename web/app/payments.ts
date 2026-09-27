@@ -172,3 +172,54 @@ export async function fetchMyTopUps(backend: string, token: string): Promise<Top
   if (!Array.isArray(doc.top_ups)) throw new Error("top-ups document carries no top_ups array");
   return doc.top_ups.map(parseTopUp);
 }
+
+// PendingTopUpRow is one pending top-up in the admin's stranded-session
+// view (ticket 18): a session left unsettled — possibly because the
+// provider was switched or the gateway disabled — older than the query's
+// age floor. accountID lets the admin reach the payer.
+export interface PendingTopUpRow {
+  id: string;
+  accountId: string;
+  reference: string;
+  provider: string;
+  amountMinor: number;
+  currency: string;
+  createdAt: string;
+}
+
+// fetchPendingTopUps loads the admin's pending top-ups older than
+// olderThanHours. Default 0: list every pending session, oldest first.
+export async function fetchPendingTopUps(
+  backend: string,
+  token: string,
+  olderThanHours = 0,
+): Promise<PendingTopUpRow[]> {
+  const doc = await apiCall<{ pending_top_ups?: unknown }>(
+    backend,
+    `/api/v1/admin/payments/pending?older_than_hours=${olderThanHours}`,
+    { headers: authedHeader(token) },
+  );
+  if (!Array.isArray(doc.pending_top_ups))
+    throw new Error("pending top-ups document carries no pending_top_ups array");
+  return doc.pending_top_ups.map(parsePendingTopUpRow);
+}
+
+// parsePendingTopUpRow pins the admin list's document shape.
+export function parsePendingTopUpRow(doc: unknown): PendingTopUpRow {
+  if (typeof doc !== "object" || doc === null) throw new Error("pending top-up is not an object");
+  const d = doc as Record<string, unknown>;
+  if (typeof d.id !== "string" || d.id === "") throw new Error("pending top-up carries no id");
+  if (typeof d.reference !== "string" || d.reference === "")
+    throw new Error("pending top-up carries no reference");
+  if (typeof d.amount_minor !== "number" || !Number.isInteger(d.amount_minor))
+    throw new Error("pending top-up amount_minor is not an integer");
+  return {
+    id: d.id,
+    accountId: typeof d.account_id === "string" ? d.account_id : "",
+    reference: d.reference,
+    provider: typeof d.provider === "string" ? d.provider : "",
+    amountMinor: d.amount_minor,
+    currency: typeof d.currency === "string" ? d.currency : "",
+    createdAt: typeof d.created_at === "string" ? d.created_at : "",
+  };
+}

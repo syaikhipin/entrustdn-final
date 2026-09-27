@@ -73,6 +73,15 @@ var (
 	// ErrAlreadyTerminal fires when a callback contradicts a closed top-up
 	// (paid after failed): loud refusal, never a silent swallow.
 	ErrAlreadyTerminal = errors.New("payments: top-up is already closed")
+	// ErrUnknownProvider fires when a callback names a provider the
+	// platform has never configured (ticket 18): refused before any
+	// verification work — the webhook answers 404. It is a not-found (the
+	// retained-config lookup missed), typed so callers can distinguish it.
+	ErrUnknownProvider = fmt.Errorf("%w: no configuration retained for provider", ErrNotFound)
+	// ErrProviderMismatch fires when a verified callback's URL provider
+	// disagrees with the top-up's own provider column (ticket 18): the
+	// reference is being walked across gateways — refuse, state untouched.
+	ErrProviderMismatch = errors.New("payments: callback provider does not match the top-up")
 )
 
 // Config is the server-side platform configuration of the gateway
