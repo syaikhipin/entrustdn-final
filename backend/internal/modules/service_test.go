@@ -422,3 +422,73 @@ func TestTemplateLoadsTheParsedSpecForAuthorizedCallers(t *testing.T) {
 		t.Errorf("grantee Template: %v", err)
 	}
 }
+
+// Ticket 14: the connector half of the consumption seam. Connector returns
+// the latest version's config, parsed and validated, for anyone who may use
+// the module — author, grantee, or anyone once system-wide — and refuses
+// strangers with ErrForbidden, a wrong-kind module, or a config that does
+// not parse as a connector spec.
+
+func TestConnectorLoadsTheParsedSpecForAuthorizedCallers(t *testing.T) {
+	svc := newTestService()
+	n := validManifest()
+	n.Kind = modules.KindConnector
+	n.Config = `{"endpoint": "http://connector.local:9090/mcp", "transport": "mcp", "query": "search_reports"}`
+	m, err := svc.Upload(t.Context(), authorID, n)
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	spec, err := svc.Connector(t.Context(), authorID, m.ModuleID)
+	if err != nil {
+		t.Fatalf("author Connector: %v", err)
+	}
+	if spec.Endpoint != "http://connector.local:9090/mcp" || spec.Transport != modules.TransportMCP || spec.Query != "search_reports" {
+		t.Errorf("spec = %+v, want the parsed connection fact", spec)
+	}
+
+	// A stranger is refused; a grantee is not.
+	if _, err := svc.Connector(t.Context(), "stranger-1", m.ModuleID); err == nil {
+		t.Errorf("stranger Connector succeeded, want ErrForbidden")
+	}
+	if err := svc.Grant(t.Context(), authorID, m.ModuleID, "grantee-1"); err != nil {
+		t.Fatalf("Grant: %v", err)
+	}
+	if _, err := svc.Connector(t.Context(), "grantee-1", m.ModuleID); err != nil {
+		t.Errorf("grantee Connector: %v", err)
+	}
+
+	// System-wide: anyone.
+	if _, err := svc.Promote(t.Context(), true, m.ModuleID, true); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if _, err := svc.Connector(t.Context(), "random-account", m.ModuleID); err != nil {
+		t.Errorf("system-wide Connector: %v", err)
+	}
+}
+
+func TestConnectorRefusesWrongKindAndUnusableConfig(t *testing.T) {
+	svc := newTestService()
+
+	// An agent skill is not a connector.
+	n := validManifest()
+	skill, err := svc.Upload(t.Context(), authorID, n)
+	if err != nil {
+		t.Fatalf("Upload skill: %v", err)
+	}
+	if _, err := svc.Connector(t.Context(), authorID, skill.ModuleID); err == nil || !strings.Contains(err.Error(), "not a connector") {
+		t.Errorf("skill Connector err = %v, want not-a-connector refusal", err)
+	}
+
+	// A connector whose config does not parse is refused too.
+	cn := validManifest()
+	cn.Kind = modules.KindConnector
+	cn.Config = `{"endpoint": "not a url at all"}`
+	broken, err := svc.Upload(t.Context(), authorID, cn)
+	if err != nil {
+		t.Fatalf("Upload connector: %v", err)
+	}
+	if _, err := svc.Connector(t.Context(), authorID, broken.ModuleID); err == nil {
+		t.Errorf("broken connector succeeded, want an unusable-connector refusal")
+	}
+}

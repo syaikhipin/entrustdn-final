@@ -34,6 +34,7 @@ func openCleanTestDB(t *testing.T, url string) *pgxpool.Pool {
 		         modules, module_grants, data_requests,
 		         inference_charge_details,
 		         top_ups, payment_gateway_config,
+		         memory_providers,
 		         ledger_entries, ledger_movements, pricing_rules, pseudonym_maps,
 		         sessions, tos_acceptances, verification_tokens, tos_versions,
 		         taxonomy_terms, accounts CASCADE`)

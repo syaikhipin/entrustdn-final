@@ -20,6 +20,7 @@ import (
 	"github.com/syaikhipin/entrustdn-final/backend/internal/conversations"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/mailsink"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/memoryprov"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/objectstore"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/payments"
@@ -135,6 +136,10 @@ func run() error {
 	paymentsStore := postgres.NewPaymentsStore(pool)
 	paymentsSvc := payments.NewService(paymentsStore, paymentsStore.LoadConfig, gwRegistry.GatewayFor)
 
+	// Memory Providers (ticket 14, ADR 0003): the admin-configured external
+	// recall services the agent dials over MCP. Connection facts only.
+	memoryProvidersSvc := memoryprov.NewService(postgres.NewMemoryProvidersStore(pool))
+
 	// Module registry (ticket 08): DB-only — no object storage dependency.
 	// Any active account may upload; the Platform Admin promotes. Built
 	// before the requests deps so ticket 13's attach endpoints can authorize
@@ -151,6 +156,9 @@ func run() error {
 			Store: postgres.NewRequestsStore(pool),
 			// Ticket 13: the registry authorizes every template/skill attach.
 			Modules: modulesSvc,
+			// Ticket 14: the admin Memory Provider registry rides every
+			// clarify turn.
+			MemoryProviders: memoryProvidersSvc,
 			Catalog: func(ctx context.Context) ([]contract.CatalogAsset, error) {
 				rules, err := rulesLoader(ctx)
 				if err != nil {
@@ -234,6 +242,9 @@ func run() error {
 		Payments: &api.PaymentsDeps{
 			Service:       paymentsSvc,
 			PublicBaseURL: cfg.PublicBaseURL,
+		},
+		MemoryProviders: &api.MemoryProvidersDeps{
+			Service: memoryProvidersSvc,
 		},
 	})
 	srv := &http.Server{

@@ -5,14 +5,23 @@ against the snapshot the backend sent), then one metered model call that
 either asks the next clarifying question or — reply prefixed with the
 CLARIFIED sentinel — declares the need fully specified. The backend meters
 and prices the reported usage; this loop only reports it honestly.
+
+Ticket 14 adds the memory and connector stage ahead of the model call: the
+loop recalls through the turn's admin-configured Memory Providers (recall
+before re-asking), queries the request's Connector Modules live, and feeds
+both into the prompt as context. New consumer facts are remembered back
+after the turn. Every memory/connector failure degrades to no context —
+the conversation continues without them.
 """
 
 import asyncio
 import re
 
 from .channels import ChannelMessage
+from .connectors import ConnectorHub, http_open
 from .contract import CatalogMatch, ClarifyRequest, ClarifyResponse, MeteredUsage
 from .gateway import FakeModelGateway, OpenAICompatibleGateway
+from .mcp_memory import MemoryRouter, http_connect
 
 # The reply prefix that marks a fully-specified need. Stripped before the
 # reply reaches the consumer.
@@ -35,7 +44,23 @@ Otherwise ask the ONE next question whose answer best narrows the need \
 (county, season, crop, granularity, licensing). Keep the reply to two \
 sentences. Never invent assets that are not in the catalog. When the need \
 is fully specified, begin the reply with "{sentinel}" followed by the \
-final summary of the request."""
+final summary of the request.{memory_block}{connector_block}"""
+
+# Recall from the admin-configured Memory Providers (ticket 14): context
+# from earlier sessions, so the agent never re-asks what it already knows.
+MEMORY_BLOCK_TEMPLATE = """
+
+Memories from earlier conversations with this consumer (recall — do not \
+re-ask what these already answer):
+{memories}"""
+
+# Live findings from the request's Connector Modules (ticket 14): external
+# data queried during this turn.
+CONNECTOR_BLOCK_TEMPLATE = """
+
+Live data just queried from connected sources (may cross-check or enrich \
+the catalog above):
+{findings}"""
 
 SKILLS_HEADER = """The consumer attached these Agent Skills to the Request. \
 They are instructions for how to conduct this conversation and interpret \
@@ -52,6 +77,22 @@ def _skills_block(skills: list) -> str:
         return ""
     return SKILLS_HEADER + "\n".join(
         SKILL_ROW_TEMPLATE.format(name=s.name, content=s.content) for s in skills
+    )
+
+
+def _memory_block(memories: list[str]) -> str:
+    if not memories:
+        return ""
+    return MEMORY_BLOCK_TEMPLATE.format(
+        memories="\n".join(f"- {m}" for m in memories)
+    )
+
+
+def _connector_block(findings: list[tuple[str, str]]) -> str:
+    if not findings:
+        return ""
+    return CONNECTOR_BLOCK_TEMPLATE.format(
+        findings="\n".join(f"- [{name}] {text}" for name, text in findings)
     )
 
 CATALOG_ROW_TEMPLATE = """- id={id} name="{name}": {description}"""
@@ -100,13 +141,27 @@ def _match_catalog(req: ClarifyRequest) -> list[CatalogMatch]:
 
 
 class ClarificationLoop:
-    """The Domain Agent's per-turn behavior over a model gateway."""
+    """The Domain Agent's per-turn behavior over a model gateway.
 
-    def __init__(self, gateway: FakeModelGateway | OpenAICompatibleGateway) -> None:
+    memory_router and connector_hub are the ticket-14 seams; both optional
+    (an empty turn rides with no memory stage, exactly the pre-ticket-14
+    shape). When set they are driven per turn from the request's
+    memory_providers / connectors contract fields.
+    """
+
+    def __init__(
+        self,
+        gateway: FakeModelGateway | OpenAICompatibleGateway,
+        memory_connect=http_connect,
+        connector_open=http_open,
+    ) -> None:
         self._gateway = gateway
+        self._memory_connect = memory_connect
+        self._connector_open = connector_open
 
     def turn(self, req: ClarifyRequest) -> ClarifyResponse:
         matches = _match_catalog(req)
+        memories, findings = self._gather_context(req)
         completion = self._gateway.complete(
             CLARIFY_SYSTEM_TEMPLATE.format(
                 description=req.description,
@@ -116,6 +171,8 @@ class ClarificationLoop:
                 spent_micros=req.spent_micros,
                 catalog=_catalog_block(req.catalog),
                 sentinel=CLARIFIED_SENTINEL,
+                memory_block=_memory_block(memories),
+                connector_block=_connector_block(findings),
             )
             + _skills_block(req.skills),
             self._user_turn(req),
@@ -140,6 +197,35 @@ class ClarificationLoop:
                 output_tokens=completion.output_tokens,
             ),
         )
+
+    def _gather_context(self, req: ClarifyRequest) -> tuple[list[str], list[tuple[str, str]]]:
+        """Recall + query + remember ahead of the model call, all degrading
+        quietly and all concurrent — a hung provider or connector costs its
+        own timeout, never the registry's stacked total, and remember (which
+        stores the consumer's message, needing no reply) never adds a second
+        fan-out on the response path. Runs under one asyncio.run (the sync
+        boundary: FastAPI runs sync handlers in a threadpool, no loop running
+        here)."""
+
+        async def gather() -> tuple[list[str], list[tuple[str, str]]]:
+            router = MemoryRouter(req.memory_providers, connect=self._memory_connect)
+            hub = ConnectorHub(req.connectors, open_mcp=self._connector_open)
+            memories, findings, _ = await asyncio.gather(
+                router.recall(req.message),
+                hub.query_all(req.message),
+                # The other half of recall-before-re-asking: store the
+                # consumer's new fact alongside the reads, so the write
+                # cannot stack its own fan-out after the model call.
+                router.remember(f"request {req.request_id}: consumer said: {req.message}"),
+            )
+            return memories, findings
+
+        try:
+            return asyncio.run(gather())
+        except Exception:
+            # The gather itself must not fail the turn — belt and braces on
+            # top of the per-provider/per-connector degradation.
+            return [], []
 
     @staticmethod
     def _user_turn(req: ClarifyRequest) -> str:

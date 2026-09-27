@@ -166,3 +166,96 @@ func (s *Service) loadSkills(ctx context.Context, r Request) ([]contract.SkillMo
 	}
 	return out, nil
 }
+
+// maxConnectorsPerRequest caps the connector list — every configured
+// connector is dialed on every clarify turn, so an unbounded list would
+// turn the turn into a latency tax.
+const maxConnectorsPerRequest = 5
+
+// AttachConnector adds a Connector Module's ID to the Request (ticket 14)
+// after the registry's authorization check. The module must actually be a
+// connector — attaching a skill here would fail every future clarify turn
+// (the loader refuses non-connector kinds), so the refusal happens now,
+// not silently later. Idempotent: an attached connector stays exactly
+// once.
+func (s *Service) AttachConnector(ctx context.Context, id, consumerID, moduleID string) (Request, error) {
+	mu := s.lockRequest(id)
+	mu.Lock()
+	defer mu.Unlock()
+
+	r, err := s.ByID(ctx, id, consumerID)
+	if err != nil {
+		return Request{}, err
+	}
+	if r.Status != StatusClarifying {
+		return Request{}, ErrClosed
+	}
+	if err := s.authorizeModule(ctx, consumerID, moduleID); err != nil {
+		return Request{}, err
+	}
+	// Kind check through the loader's read half — a skill or template
+	// never rides the connectors list.
+	if _, err := s.mods.Connector(ctx, consumerID, moduleID); err != nil {
+		return Request{}, fmt.Errorf("requests: %w: module %s is not a connector", ErrForbidden, moduleID)
+	}
+	if slices.Contains(r.Connectors, moduleID) {
+		return r, nil
+	}
+	if len(r.Connectors) >= maxConnectorsPerRequest {
+		return Request{}, fmt.Errorf("%w: requests: at most %d connectors may ride one request", ErrTooManyConnectors, maxConnectorsPerRequest)
+	}
+	r.Connectors = append(r.Connectors, moduleID)
+	if err := s.store.UpdateRequest(ctx, r); err != nil {
+		return Request{}, err
+	}
+	return r, nil
+}
+
+// DetachConnector removes one Connector Module's ID. Detaching an
+// unattached connector is not an error — the end state is what matters.
+func (s *Service) DetachConnector(ctx context.Context, id, consumerID, moduleID string) (Request, error) {
+	mu := s.lockRequest(id)
+	mu.Lock()
+	defer mu.Unlock()
+
+	r, err := s.ByID(ctx, id, consumerID)
+	if err != nil {
+		return Request{}, err
+	}
+	if r.Status != StatusClarifying {
+		return Request{}, ErrClosed
+	}
+	r.Connectors = slices.DeleteFunc(r.Connectors, func(m string) bool { return m == moduleID })
+	if err := s.store.UpdateRequest(ctx, r); err != nil {
+		return Request{}, err
+	}
+	return r, nil
+}
+
+// loadConnectors resolves every attached connector's connection fact for
+// one clarify turn. The registry supplies the latest version's parsed spec
+// at turn time. A connector that cannot be loaded fails the turn —
+// identical to the skills rule: a silently missing connector would change
+// the agent's view of the world without anyone knowing.
+func (s *Service) loadConnectors(ctx context.Context, r Request) ([]contract.ConnectorModule, error) {
+	out := []contract.ConnectorModule{}
+	if len(r.Connectors) == 0 {
+		return out, nil
+	}
+	if s.mods == nil {
+		return nil, fmt.Errorf("requests: request %s carries connectors but modules are not configured", r.ID)
+	}
+	for _, moduleID := range r.Connectors {
+		spec, err := s.mods.Connector(ctx, r.ConsumerID, moduleID)
+		if err != nil {
+			return nil, fmt.Errorf("requests: load connector %s: %w", moduleID, err)
+		}
+		out = append(out, contract.ConnectorModule{
+			Name:      moduleID,
+			Endpoint:  spec.Endpoint,
+			Transport: string(spec.Transport),
+			Query:     spec.Query,
+		})
+	}
+	return out, nil
+}

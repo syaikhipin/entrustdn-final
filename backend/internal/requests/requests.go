@@ -52,6 +52,10 @@ var ErrClosed = errors.New("requests: request is not open for clarification")
 // cap — the caller's fault, so the API renders it 422.
 var ErrTooManySkills = errors.New("requests: too many skills")
 
+// ErrTooManyConnectors is the connectors-list twin of ErrTooManySkills
+// (ticket 14).
+var ErrTooManyConnectors = errors.New("requests: too many connectors")
+
 // ErrBudgetExceeded wraps the refusal to charge a turn that would cross the
 // request's budget (and, via credits.ErrInsufficientFunds inside it, the
 // account's balance). It is always surfaced: status flips to
@@ -94,9 +98,13 @@ type Request struct {
 	Template *TemplateAttachment
 	// Skills lists the attached Agent Skills' Module IDs — the agent loads
 	// their instructions into context for every clarify turn.
-	Skills    []string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Skills []string
+	// Connectors lists the attached Connector Modules' IDs (ticket 14) —
+	// resolved to connection facts at clarify-turn time through the
+	// registry, so the latest version always rides the wire.
+	Connectors []string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // TemplateAttachment is the frozen copy of a Process Template attached to
@@ -237,13 +245,17 @@ type Clarifier interface {
 
 // ModuleSource is the ticket-13 seam to the Module registry: the request
 // service asks it who may use a Module (attach-time authorization) and
-// loads an attached Agent Skill's content (turn-time, so the latest
-// version always rides the wire). *modules.Service satisfies it; tests use
-// a fake. Nil means no Modules are attached to anything — the default
-// collection flow and no loaded skills, exactly the pre-ticket-13 shape.
+// loads an attached Agent Skill's content / Connector Module's spec
+// (turn-time, so the latest version always rides the wire).
+// *modules.Service satisfies it; tests use a fake. Nil means no Modules
+// are attached to anything — the default collection flow, no loaded
+// skills, no connector facts, exactly the pre-ticket-13 shape.
 type ModuleSource interface {
 	Accessible(ctx context.Context, callerID, moduleID string) error
 	Skill(ctx context.Context, callerID, moduleID string) (modules.SkillContent, error)
+	// Connector is the ticket-14 half: the parsed connection fact of a
+	// Connector Module (endpoint, transport, query — never credentials).
+	Connector(ctx context.Context, callerID, moduleID string) (modules.ConnectorSpec, error)
 }
 
 // CatalogSource hands the agent the current catalog snapshot each turn —
@@ -260,6 +272,11 @@ type Service struct {
 	// mods is the Module registry seam (ticket 13); nil disables module
 	// attachment entirely.
 	mods ModuleSource
+
+	// memProviders lists the platform's Memory Providers (ticket 14) — the
+	// admin registry read per turn so config changes land without a
+	// restart. Nil (or empty) means no recall context rides the wire.
+	memProviders func(ctx context.Context) ([]contract.MemoryProvider, error)
 
 	// turns guards the chat path's read-check-charge-update against
 	// concurrent turns on one request. The guard's cap is only as honest as
@@ -279,6 +296,13 @@ func NewService(store Store, agent Clarifier, catalog CatalogSource, credSvc *cr
 // the API layer wires it late (the registry service is built beside the
 // request handlers, not before them).
 func SetModuleSource(s *Service, m ModuleSource) { s.mods = m }
+
+// SetMemoryProviders attaches the Memory Provider source (ticket 14): a
+// function reading the admin registry per turn. The contract type is the
+// wire shape; the API layer adapts memoryprov.Provider onto it.
+func SetMemoryProviders(s *Service, src func(ctx context.Context) ([]contract.MemoryProvider, error)) {
+	s.memProviders = src
+}
 
 // lockRequest returns the per-request turn mutex, minting it on first use.
 func (s *Service) lockRequest(id string) *sync.Mutex {
@@ -307,6 +331,10 @@ func (s *Service) Create(ctx context.Context, consumerID string, n NewRequest) (
 		QualityBar:   strings.TrimSpace(n.QualityBar),
 		BudgetMicros: n.BudgetMicros,
 		Status:       StatusClarifying,
+		// Empty slices, never nil: the JSON boundary renders [] for the
+		// skill and connector lists of a fresh request, not null.
+		Skills:     []string{},
+		Connectors: []string{},
 	}
 	if err := s.store.CreateRequest(ctx, r); err != nil {
 		return Request{}, err
@@ -399,6 +427,30 @@ func (s *Service) Chat(ctx context.Context, id, consumerID, message string) (Tur
 		return Turn{}, err
 	}
 	req.Skills = skills
+
+	// Memory Providers (ticket 14): the admin registry read per turn, so a
+	// provider added or removed lands on the next turn without a restart.
+	// A registry read failure fails the turn — the config is platform
+	// state, and guessing (omit? stale copy?) would be worse than surfacing.
+	if s.memProviders != nil {
+		providers, err := s.memProviders(ctx)
+		if err != nil {
+			return Turn{}, fmt.Errorf("requests: load memory providers: %w", err)
+		}
+		req.MemoryProviders = providers
+	}
+	if req.MemoryProviders == nil {
+		req.MemoryProviders = []contract.MemoryProvider{}
+	}
+
+	// Attached Connector Modules ride every turn (ticket 14): the resolved
+	// connection facts, latest version, so the agent can query live
+	// sources during the turn.
+	connectors, err := s.loadConnectors(ctx, r)
+	if err != nil {
+		return Turn{}, err
+	}
+	req.Connectors = connectors
 
 	resp, err := s.agent.Clarify(ctx, req)
 	if err != nil {

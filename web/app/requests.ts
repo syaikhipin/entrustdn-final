@@ -43,6 +43,7 @@ export interface DataRequest {
   matches: AssetMatch[];
   template: TemplateAttachment | null;
   skills: string[];
+  connectors: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -115,6 +116,9 @@ export function parseRequest(doc: unknown): DataRequest {
     matches: Array.isArray(d.matches) ? d.matches.map(parseMatch) : [],
     template,
     skills: Array.isArray(d.skills) ? d.skills.map((s) => assertString(s, "request skill")) : [],
+    connectors: Array.isArray(d.connectors)
+      ? d.connectors.map((c) => assertString(c, "request connector"))
+      : [],
     createdAt: assertString(d.created_at, "request created_at"),
     updatedAt: assertString(d.updated_at, "request updated_at"),
   };
@@ -231,6 +235,36 @@ export async function detachSkill(
   moduleId: string,
 ): Promise<DataRequest> {
   const doc = await apiCall<{ request: unknown }>(backend, `/api/v1/requests/${id}/skills/${moduleId}`, {
+    method: "DELETE",
+    headers: authedHeader(token),
+  });
+  return parseRequest(doc.request);
+}
+
+// Ticket 14: Connector Modules attach like skills — the resolved
+// connection fact rides every clarify turn, letting the agent query the
+// live source. Connection facts only, never credentials.
+export async function attachConnector(
+  backend: string,
+  token: string,
+  id: string,
+  moduleId: string,
+): Promise<DataRequest> {
+  const doc = await apiCall<{ request: unknown }>(backend, `/api/v1/requests/${id}/connectors`, {
+    method: "POST",
+    headers: authedHeader(token),
+    body: JSON.stringify({ module_id: moduleId }),
+  });
+  return parseRequest(doc.request);
+}
+
+export async function detachConnector(
+  backend: string,
+  token: string,
+  id: string,
+  moduleId: string,
+): Promise<DataRequest> {
+  const doc = await apiCall<{ request: unknown }>(backend, `/api/v1/requests/${id}/connectors/${moduleId}`, {
     method: "DELETE",
     headers: authedHeader(token),
   });

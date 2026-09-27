@@ -95,6 +95,26 @@ class TestClarifyPair:
         assert len(req.skills) == 1
         assert req.skills[0].name == "Teagasc barley conventions"
         assert "t/ha" in req.skills[0].content
+        # Ticket 14: admin-configured Memory Providers and live Connectors.
+        assert len(req.memory_providers) == 1
+        assert req.memory_providers[0].name == "mem0-primary"
+        assert req.memory_providers[0].endpoint.startswith("http://")
+        assert len(req.connectors) == 1
+        assert req.connectors[0].name == "teagasc-reports"
+        assert req.connectors[0].transport == "mcp"
+        assert req.connectors[0].query == "search_reports"
+
+    def test_connector_transport_defaults_to_mcp(self) -> None:
+        doc = load_fixture("request-clarify-request.json")
+        del doc["payload"]["connectors"][0]["transport"]
+        req = ClarifyRequest.model_validate(doc["payload"])
+        assert req.connectors[0].transport == "mcp"
+
+    def test_connector_rejects_unknown_transport(self) -> None:
+        doc = load_fixture("request-clarify-request.json")
+        doc["payload"]["connectors"][0]["transport"] = "carrier-pigeon"
+        with pytest.raises(Exception):
+            ClarifyRequest.model_validate(doc["payload"])
 
     def test_response_round_trip(self) -> None:
         doc = load_fixture("request-clarify-response.json")

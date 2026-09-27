@@ -144,21 +144,45 @@ type SkillModule struct {
 	Content string `json:"content"`
 }
 
+// MemoryProvider is one admin-configured Memory Provider endpoint (ticket
+// 14, ADR 0003) handed to the agent for cross-session recall: the backend
+// owns the configuration, the agent owns the MCP connection and its
+// failures.
+type MemoryProvider struct {
+	Name     string `json:"name"`
+	Endpoint string `json:"endpoint"`
+}
+
+// ConnectorModule is one Connector Module resolved live (ticket 14): an
+// external MCP or API link the agent may query to enrich or cross-check an
+// answer. Carries connection facts only — the module's config never holds
+// credentials, and the agent treats every failure as "no data", never a
+// failed turn.
+type ConnectorModule struct {
+	Name      string `json:"name"`
+	Endpoint  string `json:"endpoint"`
+	Transport string `json:"transport,omitempty"` // "mcp" | "api"; empty = mcp
+	Query     string `json:"query,omitempty"`
+}
+
 // ClarifyRequest is one clarification turn sent backend→agent: the Request
 // so far, the Consumer's new message, the conversation history, the catalog
-// snapshot to check first, and any attached Agent Skills to load into
-// context (ticket 13).
+// snapshot to check first, any attached Agent Skills to load into
+// context (ticket 13), the Memory Provider endpoints for cross-session
+// recall (ticket 14), and the Connector Modules to query live (ticket 14).
 type ClarifyRequest struct {
-	RequestID    string         `json:"request_id"`
-	Description  string         `json:"description"`
-	Format       string         `json:"format"`
-	QualityBar   string         `json:"quality_bar"`
-	BudgetMicros int64          `json:"budget_micros"`
-	SpentMicros  int64          `json:"spent_micros"`
-	Message      string         `json:"message"`
-	History      []HistoryTurn  `json:"history"`
-	Catalog      []CatalogAsset `json:"catalog"`
-	Skills       []SkillModule  `json:"skills"`
+	RequestID       string            `json:"request_id"`
+	Description     string            `json:"description"`
+	Format          string            `json:"format"`
+	QualityBar      string            `json:"quality_bar"`
+	BudgetMicros    int64             `json:"budget_micros"`
+	SpentMicros     int64             `json:"spent_micros"`
+	Message         string            `json:"message"`
+	History         []HistoryTurn     `json:"history"`
+	Catalog         []CatalogAsset    `json:"catalog"`
+	Skills          []SkillModule     `json:"skills"`
+	MemoryProviders []MemoryProvider  `json:"memory_providers"`
+	Connectors      []ConnectorModule `json:"connectors"`
 }
 
 // UnmarshalJSON decodes strictly: unknown fields are contract violations

@@ -30,6 +30,20 @@
         "name": "Teagasc barley conventions",
         "content": "# Reading Irish barley answers\n\n- Yields are quoted in tonnes per hectare (t/ha); hectares may be approximated.\n- County names may appear in Irish or English; treat both as valid."
       }
+    ],
+    "memory_providers": [
+      {
+        "name": "mem0-primary",
+        "endpoint": "http://memory.local:8080/mcp"
+      }
+    ],
+    "connectors": [
+      {
+        "name": "teagasc-reports",
+        "endpoint": "http://connector.local:9090/mcp",
+        "transport": "mcp",
+        "query": "search_reports"
+      }
     ]
   }
 }

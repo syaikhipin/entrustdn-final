@@ -54,12 +54,35 @@
         "content": { "type": "string", "minLength": 1 }
       }
     },
+    "memory_provider": {
+      "type": "object",
+      "description": "One admin-configured Memory Provider endpoint (ticket 14, ADR 0003): where the agent's MCP client connects for cross-session recall. The backend hands the config; the agent owns the connection.",
+      "required": ["name", "endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "The provider's admin-given name, e.g. 'mem0-primary'." },
+        "endpoint": { "type": "string", "minLength": 1, "description": "The MCP server URL the agent connects to." }
+      }
+    },
+    "connector_module": {
+      "type": "object",
+      "description": "One Connector Module resolved live (ticket 14): an external MCP or API link the agent queries to enrich or cross-check its answer. Config carries only what the agent needs to connect — never credentials.",
+      "required": ["name", "endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "The connector module's slug." },
+        "endpoint": { "type": "string", "minLength": 1, "description": "The endpoint URL to query." },
+        "transport": { "type": "string", "enum": ["mcp", "api"], "description": "How to talk to the endpoint. Absent means the module's default, mcp." },
+        "query": { "type": "string", "description": "For api transport: the path or query template appended to the endpoint. For mcp: the tool name to call. Empty means the connector's default." }
+      }
+    },
     "request_clarify_request": {
       "type": "object",
-      "description": "Sent backend→agent for one clarification turn: the Request so far, the consumer's new message, the conversation history, the catalog snapshot to check first, and any attached Agent Skills to load into context.",
+      "description": "Sent backend→agent for one clarification turn: the Request so far, the consumer's new message, the conversation history, the catalog snapshot to check first, any attached Agent Skills to load into context, the Memory Provider endpoints to recall through (ticket 14), and the Connector Modules to query live.",
       "required": [
         "request_id", "description", "format", "quality_bar", "budget_micros",
-        "spent_micros", "message", "history", "catalog", "skills"
+        "spent_micros", "message", "history", "catalog", "skills",
+        "memory_providers", "connectors"
       ],
       "additionalProperties": false,
       "properties": {
@@ -72,7 +95,9 @@
         "message": { "type": "string", "minLength": 1 },
         "history": { "type": "array", "items": { "$ref": "#/$defs/history_turn" } },
         "catalog": { "type": "array", "items": { "$ref": "#/$defs/catalog_asset" } },
-        "skills": { "type": "array", "items": { "$ref": "#/$defs/skill_module" } }
+        "skills": { "type": "array", "items": { "$ref": "#/$defs/skill_module" } },
+        "memory_providers": { "type": "array", "items": { "$ref": "#/$defs/memory_provider" } },
+        "connectors": { "type": "array", "items": { "$ref": "#/$defs/connector_module" } }
       }
     },
     "catalog_match": {

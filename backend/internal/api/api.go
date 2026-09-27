@@ -66,6 +66,9 @@ type Deps struct {
 	// Payments is optional: when nil, the payment gateway endpoints
 	// (ticket 09) do not register.
 	Payments *PaymentsDeps
+	// MemoryProviders is optional: when nil, the admin Memory Provider
+	// endpoints (ticket 14) do not register.
+	MemoryProviders *MemoryProvidersDeps
 }
 
 // Handler serves the backend API.
@@ -84,7 +87,10 @@ type Handler struct {
 	collections   *collectionsHandlers
 	earnings      *earningsHandlers
 	payments      *paymentsHandlers
-	mux           *http.ServeMux
+	// memoryProviders is the ticket-14 admin registry; nil means the
+	// endpoints are not registered.
+	memoryProviders *memoryProviderHandlers
+	mux             *http.ServeMux
 }
 
 // allowedOrigins lists the browser origins allowed to call this API across
@@ -163,6 +169,10 @@ func NewHandler(deps Deps) http.Handler {
 
 	if deps.Payments != nil {
 		h.registerPaymentsRoutes(deps.Payments)
+	}
+
+	if deps.MemoryProviders != nil {
+		h.registerMemoryProviderRoutes(deps.MemoryProviders)
 	}
 
 	return withCORS(h.mux)

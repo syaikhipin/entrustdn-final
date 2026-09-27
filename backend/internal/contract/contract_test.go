@@ -192,6 +192,13 @@ func TestClarifyRequestDecodesFromFixture(t *testing.T) {
 	if len(req.Skills) != 1 || req.Skills[0].Name == "" || req.Skills[0].Content == "" {
 		t.Errorf("Skills = %+v, want one loaded Agent Skill with name and markdown content", req.Skills)
 	}
+	if len(req.MemoryProviders) != 1 || req.MemoryProviders[0].Name != "mem0-primary" || req.MemoryProviders[0].Endpoint == "" {
+		t.Errorf("MemoryProviders = %+v, want one configured provider (ticket 14)", req.MemoryProviders)
+	}
+	if len(req.Connectors) != 1 || req.Connectors[0].Name != "teagasc-reports" ||
+		req.Connectors[0].Transport != "mcp" || req.Connectors[0].Query != "search_reports" {
+		t.Errorf("Connectors = %+v, want one mcp connector (ticket 14)", req.Connectors)
+	}
 }
 
 func TestClarifyResponseDecodesFromFixture(t *testing.T) {
@@ -231,7 +238,7 @@ func TestClarifyPayloadsRejectUnknownFields(t *testing.T) {
 	}{
 		{
 			name: "clarify request",
-			raw:  `{"request_id":"r","description":"d","format":"csv","quality_bar":"","budget_micros":0,"spent_micros":0,"message":"m","history":[],"catalog":[],"extra":1}`,
+			raw:  `{"request_id":"r","description":"d","format":"csv","quality_bar":"","budget_micros":0,"spent_micros":0,"message":"m","history":[],"catalog":[],"skills":[],"memory_providers":[],"connectors":[],"extra":1}`,
 			into: &contract.ClarifyRequest{},
 		},
 		{

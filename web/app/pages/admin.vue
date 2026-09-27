@@ -27,6 +27,12 @@ import {
   saveGatewayConfig,
   type GatewayConfig,
 } from "~/payments";
+import {
+  createMemoryProvider,
+  deleteMemoryProvider,
+  fetchMemoryProviders,
+  type MemoryProvider,
+} from "~/memory";
 import { useSession } from "~/composables/useSession";
 
 const backendURL = useBackendURL();
@@ -80,6 +86,14 @@ const gatewayCurrency = ref("");
 const gatewayMicrosPerCent = ref<number | null>(null);
 const gatewayError = ref<string | null>(null);
 const gatewayNotice = ref<string | null>(null);
+
+// Memory Provider registry state (ticket 14): the external recall services
+// the agent dials over MCP — connection facts only.
+const providers = ref<MemoryProvider[]>([]);
+const newProviderName = ref("");
+const newProviderEndpoint = ref("");
+const providersError = ref<string | null>(null);
+const providersNotice = ref<string | null>(null);
 const newCategory = ref<TaxonomyCategory>("crop");
 const newLabel = ref("");
 const newKeywords = ref("");
@@ -103,6 +117,7 @@ watch(ready, (isReady) => {
     loadPricing();
     loadTerms();
     loadGateway();
+    loadProviders();
   }
 });
 
@@ -213,6 +228,52 @@ async function disableGateway() {
     gatewayNotice.value = "Gateway disabled — top-ups are off.";
   } catch (e) {
     gatewayError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+// loadProviders reads the Memory Provider registry (ticket 14).
+async function loadProviders() {
+  if (!token.value) return;
+  providersError.value = null;
+  try {
+    providers.value = await fetchMemoryProviders(backendURL, token.value);
+  } catch (e) {
+    providersError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+// submitProvider registers one provider — a connection fact, never
+// credentials: the agent connects over MCP with none.
+async function submitProvider() {
+  if (!token.value) return;
+  providersError.value = null;
+  providersNotice.value = null;
+  try {
+    const p = await createMemoryProvider(backendURL, token.value, {
+      name: newProviderName.value.trim(),
+      endpoint: newProviderEndpoint.value.trim(),
+    });
+    newProviderName.value = "";
+    newProviderEndpoint.value = "";
+    providersNotice.value = `Provider ${p.name} registered — recall now includes it.`;
+    await loadProviders();
+  } catch (e) {
+    providersError.value = e instanceof Error ? e.message : errFrom(e);
+  }
+}
+
+// removeProvider deletes one provider; the agent stops dialing it on the
+// next turn.
+async function removeProvider(p: MemoryProvider) {
+  if (!token.value) return;
+  providersError.value = null;
+  providersNotice.value = null;
+  try {
+    await deleteMemoryProvider(backendURL, token.value, p.id);
+    providersNotice.value = `Provider ${p.name} removed.`;
+    await loadProviders();
+  } catch (e) {
+    providersError.value = e instanceof Error ? e.message : errFrom(e);
   }
 }
 
@@ -683,6 +744,43 @@ async function submitDeleteTerm(t: Term) {
             </div>
           </form>
         </template>
+      </section>
+
+      <!-- Memory providers (ticket 14): external recall services the agent
+           dials over MCP. Connection facts only — no credentials exist in
+           the shape, so none are asked for. -->
+      <section class="card">
+        <h3>Memory providers</h3>
+        <p class="hint">
+          The agent recalls what earlier conversations established before it
+          re-asks a consumer. Register the recall services here — mem0,
+          Hindsight, supermemory, or any MCP-speaking provider. Connection
+          facts only: name and endpoint; the agent authenticates with none.
+          At most five.
+        </p>
+        <p v-if="providersError" class="error-text">{{ providersError }}</p>
+        <p v-if="providersNotice" class="ok-text">{{ providersNotice }}</p>
+
+        <form @submit.prevent="submitProvider">
+          <label>
+            Name (lowercase slug)
+            <input v-model="newProviderName" type="text" required placeholder="mem0-primary" />
+          </label>
+          <label>
+            MCP endpoint
+            <input v-model="newProviderEndpoint" type="url" required placeholder="http://memory.local:8080/mcp" />
+          </label>
+          <button class="primary" type="submit">Register provider</button>
+        </form>
+
+        <p v-if="providers.length === 0" class="hint">No providers configured — the agent works without memory.</p>
+        <ul v-else class="term-list">
+          <li v-for="p in providers" :key="p.id">
+            <strong>{{ p.name }}</strong>
+            <span class="hint"> — {{ p.endpoint }}</span>
+            <button class="danger" type="button" @click="removeProvider(p)">Remove</button>
+          </li>
+        </ul>
       </section>
 
       <section class="card">

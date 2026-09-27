@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
+	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
+	"github.com/syaikhipin/entrustdn-final/backend/internal/memoryprov"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/requests"
 )
@@ -27,6 +30,9 @@ type RequestsDeps struct {
 	Store   requests.Store
 	Catalog requests.CatalogSource
 	Modules *modules.Service
+	// MemoryProviders is optional (ticket 14): when nil, no Memory
+	// Provider context rides the clarify wire.
+	MemoryProviders *memoryprov.Service
 }
 
 // registerRequestsRoutes wires the request endpoints when configured.
@@ -51,6 +57,22 @@ func (h *Handler) registerRequestsRoutes(deps *RequestsDeps) {
 		// private modules reach only their author and grantees.
 		requests.SetModuleSource(h.requests.svc, deps.Modules)
 	}
+	if deps.MemoryProviders != nil {
+		// Ticket 14: the admin registry read per turn, adapted onto the
+		// contract's wire shape.
+		mps := deps.MemoryProviders
+		requests.SetMemoryProviders(h.requests.svc, func(ctx context.Context) ([]contract.MemoryProvider, error) {
+			providers, err := mps.List(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]contract.MemoryProvider, 0, len(providers))
+			for _, p := range providers {
+				out = append(out, contract.MemoryProvider{Name: p.Name, Endpoint: p.Endpoint})
+			}
+			return out, nil
+		})
+	}
 	h.mux.HandleFunc("POST /api/v1/requests", h.handleCreateRequest)
 	h.mux.HandleFunc("GET /api/v1/requests", h.handleListRequests)
 	h.mux.HandleFunc("GET /api/v1/requests/{id}", h.handleGetRequest)
@@ -59,6 +81,9 @@ func (h *Handler) registerRequestsRoutes(deps *RequestsDeps) {
 	h.mux.HandleFunc("DELETE /api/v1/requests/{id}/template", h.handleDetachTemplate)
 	h.mux.HandleFunc("POST /api/v1/requests/{id}/skills", h.handleAttachSkill)
 	h.mux.HandleFunc("DELETE /api/v1/requests/{id}/skills/{module_id}", h.handleDetachSkill)
+	// Ticket 14: Connector Modules attach like skills.
+	h.mux.HandleFunc("POST /api/v1/requests/{id}/connectors", h.handleAttachConnector)
+	h.mux.HandleFunc("DELETE /api/v1/requests/{id}/connectors/{module_id}", h.handleDetachConnector)
 }
 
 // requestsHandlers holds the resolved collaborators for the request routes.
@@ -99,6 +124,7 @@ func requestJSON(r requests.Request) map[string]any {
 		"messages":      msgs,
 		"matches":       matches,
 		"skills":        r.Skills,
+		"connectors":    r.Connectors,
 		"created_at":    r.CreatedAt.Format(timeFormat),
 		"updated_at":    r.UpdatedAt.Format(timeFormat),
 	}
@@ -340,6 +366,58 @@ func (h *Handler) handleDetachSkill(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusConflict, "this request is no longer open for clarification")
 	case err != nil:
 		apiError(w, http.StatusInternalServerError, "failed to detach the skill")
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"request": requestJSON(updated)})
+	}
+}
+
+type attachConnectorRequest struct {
+	ModuleID string `json:"module_id"`
+}
+
+// handleAttachConnector adds a Connector Module to the request's context
+// set (ticket 14): the resolved connection fact rides every clarify turn,
+// letting the agent query the live source. Authorized and kind-checked
+// through the registry like skills.
+func (h *Handler) handleAttachConnector(w http.ResponseWriter, r *http.Request) {
+	consumer, ok := h.requireConsumer(w, r)
+	if !ok {
+		return
+	}
+	var req attachConnectorRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+	updated, err := h.requests.svc.AttachConnector(r.Context(), r.PathValue("id"), consumer.ID, req.ModuleID)
+	switch {
+	case errors.Is(err, requests.ErrNotFound), errors.Is(err, requests.ErrForbidden):
+		apiError(w, http.StatusNotFound, "no such request or module")
+	case errors.Is(err, requests.ErrClosed):
+		apiError(w, http.StatusConflict, "this request is no longer open for clarification")
+	case errors.Is(err, requests.ErrTooManyConnectors):
+		apiError(w, http.StatusUnprocessableEntity, err.Error())
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "failed to attach the connector")
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"request": requestJSON(updated)})
+	}
+}
+
+// handleDetachConnector removes one connector from the request's set;
+// detaching a connector that is not attached is not an error.
+func (h *Handler) handleDetachConnector(w http.ResponseWriter, r *http.Request) {
+	consumer, ok := h.requireConsumer(w, r)
+	if !ok {
+		return
+	}
+	updated, err := h.requests.svc.DetachConnector(r.Context(), r.PathValue("id"), consumer.ID, r.PathValue("module_id"))
+	switch {
+	case errors.Is(err, requests.ErrNotFound), errors.Is(err, requests.ErrForbidden):
+		apiError(w, http.StatusNotFound, "no such request")
+	case errors.Is(err, requests.ErrClosed):
+		apiError(w, http.StatusConflict, "this request is no longer open for clarification")
+	case err != nil:
+		apiError(w, http.StatusInternalServerError, "failed to detach the connector")
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"request": requestJSON(updated)})
 	}

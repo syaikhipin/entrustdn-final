@@ -192,6 +192,26 @@ func (s *Service) Template(ctx context.Context, callerID, moduleID string) (Temp
 	return spec, nil
 }
 
+// Connector loads a Connector Module's parsed spec for a caller the
+// registry has authorized — the consumption seam's connector half (ticket
+// 14). The latest version's config is parsed strictly; a module whose kind
+// is not a connector, or whose config does not parse as one, is refused, so
+// an unusable connection fact can never reach the agent.
+func (s *Service) Connector(ctx context.Context, callerID, moduleID string) (ConnectorSpec, error) {
+	latest, err := s.requireVisible(ctx, callerID, moduleID)
+	if err != nil {
+		return ConnectorSpec{}, err
+	}
+	if latest.Kind != KindConnector {
+		return ConnectorSpec{}, fmt.Errorf("%w: %s is a %s, not a connector", ErrUnusableConnector, moduleID, latest.Kind)
+	}
+	spec, err := ParseConnectorSpec([]byte(latest.Config))
+	if err != nil {
+		return ConnectorSpec{}, err
+	}
+	return spec, nil
+}
+
 // requireVisible loads the Module and refuses callers who may not see it.
 func (s *Service) requireVisible(ctx context.Context, callerID, moduleID string) (Module, error) {
 	latest, err := s.store.LatestModuleVersion(ctx, moduleID)

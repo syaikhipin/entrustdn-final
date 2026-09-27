@@ -228,3 +228,89 @@ func TestSkillsRideTheWireIntoTheAgentContext(t *testing.T) {
 		t.Errorf("skill on the wire = %+v, want the markdown content loaded", got.Skills[0])
 	}
 }
+
+// connectorUploadBody is a private Connector Module: an MCP endpoint fact
+// — connection only, never credentials (ticket 14).
+func connectorUploadBody() map[string]any {
+	return map[string]any{
+		"name":       "teagasc-reports",
+		"kind":       "connector",
+		"version":    "1.0.0",
+		"capability": "Answers barley-report questions from the Teagasc source.",
+		"config":     `{"endpoint": "http://connector.local:9090/mcp", "transport": "mcp", "query": "search_reports"}`,
+	}
+}
+
+func TestConsumerAttachesConnectorToTheirRequest(t *testing.T) {
+	srv, adminToken, mail, agent := newRequestModuleServer(t)
+
+	consID, consToken := newConsumer(t, srv, mail, "connector-consumer@example.org")
+	fundConsumer(t, srv, adminToken, consID)
+	connID := uploadModule(t, srv, consToken, connectorUploadBody())
+
+	code, doc := postWithToken(t, srv, "/api/v1/requests", consToken, map[string]any{
+		"description": "Spring barley yields", "format": "csv", "budget_micros": 5_000_000,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create request = %d (doc: %v)", code, doc)
+	}
+	reqID := doc["request"].(map[string]any)["id"].(string)
+
+	// Attach the connector; the request's connectors list shows it.
+	code, doc = postWithToken(t, srv, fmt.Sprintf("/api/v1/requests/%s/connectors", reqID), consToken, map[string]any{"module_id": connID})
+	if code != http.StatusOK {
+		t.Fatalf("attach connector = %d (doc: %v)", code, doc)
+	}
+	conns := doc["request"].(map[string]any)["connectors"].([]any)
+	if len(conns) != 1 || conns[0] != connID {
+		t.Errorf("connectors = %v, want [%s]", conns, connID)
+	}
+
+	// The resolved connection fact rides the clarify wire.
+	code, doc = postWithToken(t, srv, fmt.Sprintf("/api/v1/requests/%s/chat", reqID), consToken, map[string]any{"message": "hello"})
+	if code != http.StatusOK {
+		t.Fatalf("chat = %d (doc: %v)", code, doc)
+	}
+	if len(agent.got) != 1 {
+		t.Fatalf("agent saw %d clarify payloads, want 1", len(agent.got))
+	}
+	got := agent.got[0]
+	if len(got.Connectors) != 1 {
+		t.Fatalf("clarify payload connectors = %+v, want one", got.Connectors)
+	}
+	c := got.Connectors[0]
+	if c.Endpoint != "http://connector.local:9090/mcp" || c.Transport != "mcp" || c.Query != "search_reports" {
+		t.Errorf("connector on the wire = %+v, want the parsed connection fact", c)
+	}
+
+	// Detach.
+	code, doc = doWithToken(t, http.MethodDelete, srv, fmt.Sprintf("/api/v1/requests/%s/connectors/%s", reqID, connID), consToken, nil)
+	if code != http.StatusOK {
+		t.Fatalf("detach connector = %d (doc: %v)", code, doc)
+	}
+	conns, _ = doc["request"].(map[string]any)["connectors"].([]any)
+	if len(conns) != 0 {
+		t.Errorf("connectors after detach = %v, want none", conns)
+	}
+}
+
+func TestConnectorAttachRefusesAStrangersPrivateModule(t *testing.T) {
+	srv, _, mail, _ := newRequestModuleServer(t)
+
+	_, authorToken := newConsumer(t, srv, mail, "conn-author@example.org")
+	connID := uploadModule(t, srv, authorToken, connectorUploadBody())
+
+	_, otherToken := newConsumer(t, srv, mail, "conn-stranger@example.org")
+	code, doc := postWithToken(t, srv, "/api/v1/requests", otherToken, map[string]any{
+		"description": "Other data", "format": "csv", "budget_micros": 5_000_000,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create request = %d (doc: %v)", code, doc)
+	}
+	reqID := doc["request"].(map[string]any)["id"].(string)
+
+	code, _ = postWithToken(t, srv, fmt.Sprintf("/api/v1/requests/%s/connectors", reqID), otherToken, map[string]any{"module_id": connID})
+	if code != http.StatusNotFound {
+		t.Errorf("stranger connector attach = %d, want 404", code)
+	}
+}

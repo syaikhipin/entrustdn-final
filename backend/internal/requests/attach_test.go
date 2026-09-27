@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/modules"
 	"github.com/syaikhipin/entrustdn-final/backend/internal/requests"
 )
@@ -42,6 +43,7 @@ func attachFixture(t *testing.T) (*requests.Service, *fakeModules) {
 		skills: map[string]modules.SkillContent{
 			"skill-1": {ModuleID: "skill-1", Name: "barley-notes", Content: "# notes"},
 		},
+		connectors: map[string]modules.ConnectorSpec{},
 	}
 	requests.SetModuleSource(svc, fm)
 	return svc, fm
@@ -62,6 +64,15 @@ type fakeModules struct {
 	accessible map[string]bool // callerID → allowed
 	asks       []string        // every Accessible ask, "caller|module"
 	skills     map[string]modules.SkillContent
+	connectors map[string]modules.ConnectorSpec
+}
+
+func (f *fakeModules) Connector(_ context.Context, callerID, moduleID string) (modules.ConnectorSpec, error) {
+	spec, ok := f.connectors[moduleID]
+	if !ok {
+		return modules.ConnectorSpec{}, modules.ErrNotFound
+	}
+	return spec, nil
 }
 
 func (f *fakeModules) Accessible(_ context.Context, callerID, moduleID string) error {
@@ -336,5 +347,183 @@ func TestAttachSkillPastTheCapIsACallerFault(t *testing.T) {
 	_, err := svc.AttachSkill(t.Context(), r.ID, "consumer-1", "skill-99")
 	if !errors.Is(err, requests.ErrTooManySkills) {
 		t.Errorf("error = %v, want ErrTooManySkills", err)
+	}
+}
+
+// Ticket 14: Connector Modules attach like skills — module IDs on the
+// Request, resolved to connection facts at clarify-turn time. The kind
+// check happens at attach: a module that is not a connector would fail
+// every future turn when the loader refuses it.
+
+func TestAttachConnectorRecordsTheModuleRef(t *testing.T) {
+	svc, fm := attachFixture(t)
+	r := newRequest(t, svc)
+	fm.accessible["consumer-1"] = true
+	fm.connectors["conn-1"] = modules.ConnectorSpec{
+		Endpoint: "http://connector.local:9090/mcp", Transport: modules.TransportMCP, Query: "search_reports",
+	}
+
+	updated, err := svc.AttachConnector(t.Context(), r.ID, "consumer-1", "conn-1")
+	if err != nil {
+		t.Fatalf("AttachConnector: %v", err)
+	}
+	if len(updated.Connectors) != 1 || updated.Connectors[0] != "conn-1" {
+		t.Fatalf("connectors = %+v, want [conn-1]", updated.Connectors)
+	}
+	// Durable.
+	stored, _ := svc.ByID(t.Context(), r.ID, "consumer-1")
+	if len(stored.Connectors) != 1 || stored.Connectors[0] != "conn-1" {
+		t.Errorf("stored connectors = %+v, want [conn-1]", stored.Connectors)
+	}
+}
+
+func TestAttachConnectorIsIdempotent(t *testing.T) {
+	svc, fm := attachFixture(t)
+	r := newRequest(t, svc)
+	fm.accessible["consumer-1"] = true
+	fm.connectors["conn-1"] = modules.ConnectorSpec{Endpoint: "http://c.local/mcp"}
+
+	if _, err := svc.AttachConnector(t.Context(), r.ID, "consumer-1", "conn-1"); err != nil {
+		t.Fatalf("AttachConnector: %v", err)
+	}
+	updated, err := svc.AttachConnector(t.Context(), r.ID, "consumer-1", "conn-1")
+	if err != nil {
+		t.Fatalf("second AttachConnector: %v", err)
+	}
+	if len(updated.Connectors) != 1 {
+		t.Errorf("connectors = %+v, want the single ref", updated.Connectors)
+	}
+}
+
+func TestAttachConnectorRefusesUnauthorizedModules(t *testing.T) {
+	svc, fm := denyFixture(t)
+	r := newRequest(t, svc)
+	fm.connectors = map[string]modules.ConnectorSpec{
+		"conn-1": {Endpoint: "http://c.local/mcp"},
+	}
+
+	if _, err := svc.AttachConnector(t.Context(), r.ID, "consumer-1", "private-conn"); !errors.Is(err, requests.ErrForbidden) {
+		t.Errorf("unauthorized connector attach = %v, want ErrForbidden", err)
+	}
+}
+
+func TestAttachConnectorRefusesAModuleThatIsNotAConnector(t *testing.T) {
+	// A skill on the connectors list would fail every future clarify turn —
+	// the loader refuses non-connector kinds. Refusal is attach-time.
+	svc, fm := attachFixture(t)
+	r := newRequest(t, svc)
+	fm.accessible["consumer-1"] = true
+
+	_, err := svc.AttachConnector(t.Context(), r.ID, "consumer-1", "skill-1")
+	if err == nil {
+		t.Fatalf("attaching a non-connector module succeeded, want a refusal")
+	}
+	if !errors.Is(err, requests.ErrForbidden) {
+		t.Errorf("error = %v, want ErrForbidden wrapped", err)
+	}
+	stored, _ := svc.ByID(t.Context(), r.ID, "consumer-1")
+	if len(stored.Connectors) != 0 {
+		t.Errorf("connectors = %+v, want none attached", stored.Connectors)
+	}
+}
+
+func TestDetachConnectorRemovesTheRef(t *testing.T) {
+	svc, fm := attachFixture(t)
+	r := newRequest(t, svc)
+	fm.accessible["consumer-1"] = true
+	fm.connectors["conn-1"] = modules.ConnectorSpec{Endpoint: "http://c.local/mcp"}
+
+	if _, err := svc.AttachConnector(t.Context(), r.ID, "consumer-1", "conn-1"); err != nil {
+		t.Fatalf("AttachConnector: %v", err)
+	}
+	updated, err := svc.DetachConnector(t.Context(), r.ID, "consumer-1", "conn-1")
+	if err != nil {
+		t.Fatalf("DetachConnector: %v", err)
+	}
+	if len(updated.Connectors) != 0 {
+		t.Errorf("connectors = %+v, want none after detach", updated.Connectors)
+	}
+}
+
+func TestClarifyTurnCarriesConnectorFactsToTheAgent(t *testing.T) {
+	// The end-to-end behavior: the resolved connection fact rides the
+	// ClarifyRequest the agent receives.
+	svc, _, clari := fixture(t, testCatalog)
+	fm := &fakeModules{
+		accessible: map[string]bool{"consumer-1": true},
+		connectors: map[string]modules.ConnectorSpec{
+			"conn-1": {Endpoint: "http://teagasc.local:9090/mcp", Transport: modules.TransportMCP, Query: "search_reports"},
+		},
+	}
+	requests.SetModuleSource(svc, fm)
+	r := newRequest(t, svc)
+	if _, err := svc.AttachConnector(t.Context(), r.ID, "consumer-1", "conn-1"); err != nil {
+		t.Fatalf("AttachConnector: %v", err)
+	}
+
+	if _, err := svc.Chat(t.Context(), r.ID, "consumer-1", "spring barley yields?"); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	req := clari.got[0]
+	if len(req.Connectors) != 1 {
+		t.Fatalf("clarify connectors = %+v, want one", req.Connectors)
+	}
+	got := req.Connectors[0]
+	if got.Name != "conn-1" || got.Endpoint != "http://teagasc.local:9090/mcp" ||
+		got.Transport != "mcp" || got.Query != "search_reports" {
+		t.Errorf("connector fact = %+v, want the resolved spec", got)
+	}
+	// The contract field must always be an array, never null.
+	if req.Connectors == nil {
+		t.Errorf("connectors is nil, want an empty slice minimum")
+	}
+}
+
+// Ticket 14: the admin-configured Memory Providers ride every clarify
+// turn — the registry is read per turn, so config changes land without a
+// restart. A registry read failure fails the turn: the config is platform
+// state, and guessing would be worse than surfacing.
+func TestClarifyTurnCarriesMemoryProvidersFromTheRegistry(t *testing.T) {
+	svc, _, clari := fixture(t, testCatalog)
+	var registered []contract.MemoryProvider
+	requests.SetMemoryProviders(svc, func(context.Context) ([]contract.MemoryProvider, error) {
+		return registered, nil
+	})
+
+	r := newRequest(t, svc)
+	if _, err := svc.Chat(t.Context(), r.ID, "consumer-1", "hello?"); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	// No providers configured yet: the field rides as an empty array.
+	if got := clari.got[0].MemoryProviders; len(got) != 0 || got == nil {
+		t.Errorf("memory providers = %+v, want an empty non-nil array", got)
+	}
+
+	// The admin registers one; the next turn carries it without a restart.
+	registered = []contract.MemoryProvider{
+		{Name: "mem0-primary", Endpoint: "http://memory.local:8080/mcp"},
+	}
+	r2 := newRequest(t, svc)
+	if _, err := svc.Chat(t.Context(), r2.ID, "consumer-1", "spring barley yields?"); err != nil {
+		t.Fatalf("second Chat: %v", err)
+	}
+	providers := clari.got[1].MemoryProviders
+	if len(providers) != 1 {
+		t.Fatalf("memory providers = %+v, want the one configured", providers)
+	}
+	if providers[0].Name != "mem0-primary" || providers[0].Endpoint != "http://memory.local:8080/mcp" {
+		t.Errorf("provider on the wire = %+v, want the connection fact", providers[0])
+	}
+}
+
+func TestClarifyTurnFailsWhenTheProviderRegistryCannotBeRead(t *testing.T) {
+	svc, _, _ := fixture(t, testCatalog)
+	requests.SetMemoryProviders(svc, func(context.Context) ([]contract.MemoryProvider, error) {
+		return nil, errors.New("registry down")
+	})
+
+	r := newRequest(t, svc)
+	if _, err := svc.Chat(t.Context(), r.ID, "consumer-1", "hello?"); err == nil {
+		t.Errorf("Chat succeeded with an unreadable provider registry, want a failed turn")
 	}
 }

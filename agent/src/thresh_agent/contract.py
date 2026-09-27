@@ -94,6 +94,30 @@ class SkillModule(BaseModel):
     content: str = Field(min_length=1)
 
 
+class MemoryProvider(BaseModel):
+    """One admin-configured Memory Provider endpoint (ticket 14, ADR 0003)
+    handed over for cross-session recall: the backend owns the config, the
+    agent owns the MCP connection and any failure it hits."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    endpoint: str = Field(min_length=1)
+
+
+class ConnectorModule(BaseModel):
+    """One Connector Module resolved live (ticket 14): an external MCP or
+    API link the agent may query to enrich or cross-check an answer.
+    Connection facts only — the agent treats every failure as no data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    endpoint: str = Field(min_length=1)
+    transport: str = Field(default="mcp", pattern="^(mcp|api)$")
+    query: str = ""
+
+
 class ClarifyRequest(BaseModel):
     """One clarification turn sent backend→agent."""
 
@@ -109,6 +133,8 @@ class ClarifyRequest(BaseModel):
     history: list[HistoryTurn] = Field(default_factory=list)
     catalog: list[CatalogAsset] = Field(default_factory=list)
     skills: list[SkillModule] = Field(default_factory=list)
+    memory_providers: list[MemoryProvider] = Field(default_factory=list)
+    connectors: list[ConnectorModule] = Field(default_factory=list)
 
 
 class CatalogMatch(BaseModel):

@@ -45,14 +45,49 @@ class FakeMemoryProvider(MCPServer):
         self._memories.append(text)
         return f"mem-{len(self._memories)}"
 
-    # MCP tool: recall memories matching the query.
+    # MCP tool: recall memories matching the query. Matches on any
+    # significant word of the query (the way a real provider's semantic
+    # recall behaves for these tests) — not the whole query as one
+    # substring, which no honest sentence would ever be.
     def recall_memory(self, query: str) -> str:
-        needle = query.lower()
-        return json.dumps([m for m in self._memories if needle in m.lower()])
+        words = {w for w in query.lower().split() if len(w) > 2}
+        hits = [
+            m for m in self._memories
+            if any(w in m.lower() for w in words)
+        ]
+        return json.dumps(hits)
 
     def recall_all(self) -> list[str]:
         """Test helper: every stored memory."""
         return list(self._memories)
+
+
+class FakeConnectorServer(MCPServer):
+    """In-process MCP connector (ticket 14): answers a `query` tool call
+    with canned findings, recording what it was asked."""
+
+    def __init__(self, answer: str = "Teagasc reports 7.8 t/ha average for spring barley") -> None:
+        super().__init__(name="fake-connector")
+        self.answer = answer
+        self.queries: list[str] = []
+        self.add_tool(
+            self.query,
+            description="Answer a data question from the connector's source.",
+        )
+
+    # MCP tool: answer one query.
+    def query(self, query: str) -> str:
+        self.queries.append(query)
+        return self.answer
+
+    def fail_query(self, query: str) -> str:
+        self.queries.append(query)
+        raise RuntimeError("connector source unavailable")
+
+    def enable_failure(self) -> None:
+        """Point the tool at the failing implementation — the degradation
+        path, without tearing the server down."""
+        self._tool_manager._tools["query"].fn = self.fail_query  # type: ignore[attr-defined]
 
 
 @asynccontextmanager
