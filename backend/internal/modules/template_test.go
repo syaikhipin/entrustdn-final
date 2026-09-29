@@ -212,7 +212,7 @@ func TestTemplateSpecEvaluateRunsEveryRuleType(t *testing.T) {
 		wantOK bool
 	}{
 		{name: "a real answer passes all four", answer: "42 hectares of spring barley", wantOK: true},
-				{name: "too short for min_length", answer: "42 h", wantOK: false},
+		{name: "too short for min_length", answer: "42 h", wantOK: false},
 		{name: "too long for max_length", answer: strings.Repeat("x", 41), wantOK: false},
 		{name: "a bare yes is refused by not_one_of", answer: "yes", wantOK: false},
 		{name: "maybe anywhere is forbidden", answer: "maybe around 40 hectares", wantOK: false},
