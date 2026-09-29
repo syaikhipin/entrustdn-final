@@ -246,6 +246,9 @@ func run() error {
 		MemoryProviders: &api.MemoryProvidersDeps{
 			Service: memoryProvidersSvc,
 		},
+		Stats: &api.StatsDeps{
+			Source: postgres.NewStatsSource(pool),
+		},
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,

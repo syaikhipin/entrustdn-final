@@ -69,6 +69,9 @@ type Deps struct {
 	// MemoryProviders is optional: when nil, the admin Memory Provider
 	// endpoints (ticket 14) do not register.
 	MemoryProviders *MemoryProvidersDeps
+	// Stats is optional: when nil, the admin stats endpoint (ticket 16)
+	// does not register.
+	Stats *StatsDeps
 }
 
 // Handler serves the backend API.
@@ -90,7 +93,10 @@ type Handler struct {
 	// memoryProviders is the ticket-14 admin registry; nil means the
 	// endpoints are not registered.
 	memoryProviders *memoryProviderHandlers
-	mux             *http.ServeMux
+	// stats is the ticket-16 dashboard; nil means the endpoint is not
+	// registered.
+	stats *statsHandlers
+	mux   *http.ServeMux
 }
 
 // allowedOrigins lists the browser origins allowed to call this API across
@@ -173,6 +179,10 @@ func NewHandler(deps Deps) http.Handler {
 
 	if deps.MemoryProviders != nil {
 		h.registerMemoryProviderRoutes(deps.MemoryProviders)
+	}
+
+	if deps.Stats != nil {
+		h.registerStatsRoutes(deps.Stats)
 	}
 
 	return withCORS(h.mux)
