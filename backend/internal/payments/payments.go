@@ -19,9 +19,12 @@ import (
 	"github.com/syaikhipin/entrustdn-final/backend/internal/credits"
 )
 
-// Provider names the supported gateways. Stripe is implemented; PayPal
-// slots into the Registry behind the same Gateway seam.
-const ProviderStripe = "stripe"
+// Provider names the supported gateways. Both build behind the same
+// Gateway seam; the Registry picks per config.
+const (
+	ProviderStripe = "stripe"
+	ProviderPayPal = "paypal"
+)
 
 // Status is the life cycle of one top-up. Pending until the gateway
 // reports an outcome; failed/cancelled are terminal refusals; settled is
@@ -88,12 +91,21 @@ var (
 // (ADR 0004: credentials never leave the server; Module Authors can never
 // touch payment paths). A zero Config means top-ups are disabled.
 type Config struct {
-	// Provider selects the gateway implementation ("stripe"; "paypal" later).
+	// Provider selects the gateway implementation ("stripe", "paypal").
 	Provider string `json:"provider"`
-	// APIKey authenticates the platform to the gateway.
+	// APIKey authenticates the platform to the gateway — for PayPal, the
+	// OAuth2 client id (the client secret rides in WebhookSecret, the slot
+	// the admin form already reserves for the second credential).
 	APIKey string `json:"-"`
-	// WebhookSecret verifies callback signatures.
+	// WebhookSecret verifies callback signatures (Stripe) or is PayPal's
+	// OAuth2 client secret (its callbacks verify with a certificate, not a
+	// shared secret).
 	WebhookSecret string `json:"-"`
+	// WebhookID is PayPal's per-webhook identifier — the third field of the
+	// signed message its callbacks verify against. Stripe needs no such
+	// field (its secret carries the identity), so only the PayPal gateway
+	// reads it.
+	WebhookID string `json:"-"`
 	// Currency is the three-letter code the platform charges in (ISO 4217).
 	Currency string `json:"currency"`
 	// ReturnBaseURL prefixes the gateway's success/cancel redirect URLs —
@@ -107,10 +119,15 @@ type Config struct {
 
 // Enabled reports whether a gateway is fully configured. Any partial
 // configuration counts as disabled: a half-set gateway is a
-// misconfiguration, not a degraded mode.
+// misconfiguration, not a degraded mode. PayPal additionally needs its
+// webhook ID; a PayPal config without one is half-set.
 func (c Config) Enabled() bool {
-	return c.Provider != "" && c.APIKey != "" && c.WebhookSecret != "" &&
+	base := c.Provider != "" && c.APIKey != "" && c.WebhookSecret != "" &&
 		c.Currency != "" && c.MicrosPerCent > 0 && c.ReturnBaseURL != ""
+	if c.Provider == ProviderPayPal {
+		return base && c.WebhookID != ""
+	}
+	return base
 }
 
 // Validate refuses configurations that cannot work — structurally. Whether
@@ -126,6 +143,9 @@ func (c Config) Validate() error {
 	}
 	if c.WebhookSecret == "" {
 		return errors.New("payments: webhook secret must be set")
+	}
+	if c.Provider == ProviderPayPal && c.WebhookID == "" {
+		return errors.New("payments: webhook id must be set for paypal (the id PayPal assigns the webhook when the listener URL is registered)")
 	}
 	if len(c.Currency) != 3 || c.Currency != strings.ToLower(c.Currency) {
 		return errors.New("payments: currency must be a three-letter lowercase ISO 4217 code")

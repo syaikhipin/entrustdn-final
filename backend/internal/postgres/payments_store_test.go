@@ -84,7 +84,8 @@ func TestStoreTopUpConfigRoundTrip(t *testing.T) {
 	}
 	want := payments.Config{
 		Provider: "stripe", APIKey: "sk_live_x", WebhookSecret: "whsec_y",
-		Currency: "eur", MicrosPerCent: 10_000, ReturnBaseURL: "https://thresh.example",
+		WebhookID: "", // Stripe carries no webhook id
+		Currency:  "eur", MicrosPerCent: 10_000, ReturnBaseURL: "https://thresh.example",
 	}
 	if err := ps.SaveConfig(t.Context(), want); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
@@ -262,6 +263,7 @@ func TestStoreConfigByProviderRetainsAcrossSwitchAndDisable(t *testing.T) {
 	}
 	paypal := stripe
 	paypal.Provider, paypal.APIKey, paypal.WebhookSecret = "paypal", "pp_live", "whsec_pp"
+	paypal.WebhookID = "whid_pp" // PayPal's third credential, retained too
 	if err := ps.SaveConfig(ctx, paypal); err != nil {
 		t.Fatalf("SaveConfig paypal: %v", err)
 	}

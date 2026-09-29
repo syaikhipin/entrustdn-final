@@ -160,13 +160,13 @@ func (g *StripeGateway) ParseCallback(_ context.Context, header http.Header, bod
 }
 
 // errUnhandledEvent marks a verified event we don't act on. The caller
-// (API layer) answers 200 so Stripe stops retrying; nothing settles.
+// (API layer) answers 200 so the gateway stops retrying; nothing settles.
 type errUnhandledEvent struct{ eventType string }
 
-func (e errUnhandledEvent) Error() string { return "payments: unhandled stripe event " + e.eventType }
+func (e errUnhandledEvent) Error() string { return "payments: unhandled gateway event " + e.eventType }
 
 // IsUnhandledEvent reports whether the callback carried a verified but
-// irrelevant Stripe event — the webhook should answer 200 and move on.
+// irrelevant gateway event — the webhook should answer 200 and move on.
 func IsUnhandledEvent(err error) bool {
 	var target errUnhandledEvent
 	return errors.As(err, &target)

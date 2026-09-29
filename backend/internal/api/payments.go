@@ -55,6 +55,7 @@ type gatewayConfigResponse struct {
 	Provider      string `json:"provider"`
 	APIKeySet     bool   `json:"api_key_set"`
 	SecretSet     bool   `json:"webhook_secret_set"`
+	WebhookIDSet  bool   `json:"webhook_id_set"`
 	Currency      string `json:"currency"`
 	MicrosPerCent int64  `json:"micros_per_cent"`
 	ReturnBaseURL string `json:"return_base_url"`
@@ -66,6 +67,7 @@ func maskGatewayConfig(cfg payments.Config) gatewayConfigResponse {
 		Provider:      cfg.Provider,
 		APIKeySet:     cfg.APIKey != "",
 		SecretSet:     cfg.WebhookSecret != "",
+		WebhookIDSet:  cfg.WebhookID != "",
 		Currency:      cfg.Currency,
 		MicrosPerCent: cfg.MicrosPerCent,
 		ReturnBaseURL: cfg.ReturnBaseURL,
@@ -90,6 +92,7 @@ type gatewayConfigRequest struct {
 	Provider      string `json:"provider"`
 	APIKey        string `json:"api_key"`
 	WebhookSecret string `json:"webhook_secret"`
+	WebhookID     string `json:"webhook_id"`
 	Currency      string `json:"currency"`
 	MicrosPerCent int64  `json:"micros_per_cent"`
 }
@@ -117,10 +120,14 @@ func (h *Handler) handleSaveGatewayConfig(w http.ResponseWriter, r *http.Request
 	if req.WebhookSecret == "" {
 		req.WebhookSecret = current.WebhookSecret
 	}
+	if req.WebhookID == "" {
+		req.WebhookID = current.WebhookID
+	}
 	cfg := payments.Config{
 		Provider:      strings.ToLower(strings.TrimSpace(req.Provider)),
 		APIKey:        strings.TrimSpace(req.APIKey),
 		WebhookSecret: strings.TrimSpace(req.WebhookSecret),
+		WebhookID:     strings.TrimSpace(req.WebhookID),
 		Currency:      strings.ToLower(strings.TrimSpace(req.Currency)),
 		MicrosPerCent: req.MicrosPerCent,
 		ReturnBaseURL: h.payments.publicBaseURL,

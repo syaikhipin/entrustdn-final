@@ -95,6 +95,9 @@ func registryWith(t *testing.T, gw payments.Gateway) *payments.Registry {
 	t.Helper()
 	reg := payments.NewRegistry()
 	reg.Register("fakepay", func(payments.Config) (payments.Gateway, error) { return gw, nil })
+	// paypal rides the same fake in config-surface tests: the real PayPal
+	// gateway's signature scheme is proven in the payments package tests.
+	reg.Register(payments.ProviderPayPal, func(payments.Config) (payments.Gateway, error) { return gw, nil })
 	return reg
 }
 
@@ -192,6 +195,50 @@ func TestAdminConfiguresGatewayAndConsumersSeeIt(t *testing.T) {
 func docString(doc map[string]any) string {
 	b, _ := json.Marshal(doc)
 	return string(b)
+}
+
+// Ticket 17: PayPal's webhook id is a third credential on the config
+// surface — masked like the others, rotating with the same blank-keeps-
+// stored rule. A paypal config without it is not enabled.
+func TestGatewayConfigWebhookIDMaskedAndRotatesIndependently(t *testing.T) {
+	srv, adminToken, _, _ := newPaymentsServer(t, &fakeCallbackGateway{})
+
+	// A paypal config without the webhook id is refused structurally.
+	code, doc := postWithToken(t, srv, "/api/v1/admin/payments/config", adminToken, map[string]any{
+		"provider": "paypal", "api_key": "pp_id", "webhook_secret": "pp_secret",
+		"currency": "eur", "micros_per_cent": 10_000,
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("paypal config without webhook id = %d (doc: %v), want 422", code, doc)
+	}
+
+	// Save it with the id; the response masks it like the other credentials.
+	code, doc = postWithToken(t, srv, "/api/v1/admin/payments/config", adminToken, map[string]any{
+		"provider": "paypal", "api_key": "pp_id", "webhook_secret": "pp_secret",
+		"webhook_id": "whid_123", "currency": "eur", "micros_per_cent": 10_000,
+	})
+	if code != http.StatusOK || doc["enabled"] != true {
+		t.Fatalf("paypal config = (%d, %v), want enabled", code, doc)
+	}
+	if strings.Contains(docString(doc), "whid_123") {
+		t.Errorf("config response leaks the webhook id: %v", doc)
+	}
+	if doc["webhook_id_set"] != true {
+		t.Errorf("masked config = %v, want webhook_id_set reported", doc)
+	}
+
+	// Rotating the secret alone keeps the stored webhook id (and the
+	// config stays enabled).
+	code, doc = postWithToken(t, srv, "/api/v1/admin/payments/config", adminToken, map[string]any{
+		"provider": "paypal", "webhook_secret": "rotated_secret",
+		"currency": "eur", "micros_per_cent": 10_000,
+	})
+	if code != http.StatusOK || doc["enabled"] != true {
+		t.Fatalf("rotated config = (%d, %v), want enabled via kept webhook id", code, doc)
+	}
+	if doc["webhook_id_set"] != true {
+		t.Errorf("config after rotation = %v, want webhook id kept", doc)
+	}
 }
 
 func TestConsumerTopUpFlowCreditsTheLedger(t *testing.T) {

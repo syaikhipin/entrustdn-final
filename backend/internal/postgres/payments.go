@@ -38,17 +38,18 @@ var _ payments.TopUpStore = (*PaymentsStore)(nil)
 func (s *PaymentsStore) SaveConfig(ctx context.Context, cfg payments.Config) error {
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO payment_gateway_config
-			(id, provider, api_key, webhook_secret, currency, micros_per_cent, return_base_url, updated_at)
-		VALUES (1, $1, $2, $3, $4, $5, $6, now())
+			(id, provider, api_key, webhook_secret, webhook_id, currency, micros_per_cent, return_base_url, updated_at)
+		VALUES (1, $1, $2, $3, $4, $5, $6, $7, now())
 		ON CONFLICT (id) DO UPDATE SET
 			provider = EXCLUDED.provider,
 			api_key = EXCLUDED.api_key,
 			webhook_secret = EXCLUDED.webhook_secret,
+			webhook_id = EXCLUDED.webhook_id,
 			currency = EXCLUDED.currency,
 			micros_per_cent = EXCLUDED.micros_per_cent,
 			return_base_url = EXCLUDED.return_base_url,
 			updated_at = now()`,
-		cfg.Provider, cfg.APIKey, cfg.WebhookSecret, cfg.Currency, cfg.MicrosPerCent, cfg.ReturnBaseURL); err != nil {
+		cfg.Provider, cfg.APIKey, cfg.WebhookSecret, cfg.WebhookID, cfg.Currency, cfg.MicrosPerCent, cfg.ReturnBaseURL); err != nil {
 		return fmt.Errorf("save payment gateway config: %w", err)
 	}
 	return nil
@@ -59,9 +60,9 @@ func (s *PaymentsStore) SaveConfig(ctx context.Context, cfg payments.Config) err
 func (s *PaymentsStore) LoadConfig(ctx context.Context) (payments.Config, error) {
 	var cfg payments.Config
 	err := s.pool.QueryRow(ctx, `
-		SELECT provider, api_key, webhook_secret, currency, micros_per_cent, return_base_url
+		SELECT provider, api_key, webhook_secret, webhook_id, currency, micros_per_cent, return_base_url
 		FROM payment_gateway_config WHERE id = 1`).
-		Scan(&cfg.Provider, &cfg.APIKey, &cfg.WebhookSecret, &cfg.Currency, &cfg.MicrosPerCent, &cfg.ReturnBaseURL)
+		Scan(&cfg.Provider, &cfg.APIKey, &cfg.WebhookSecret, &cfg.WebhookID, &cfg.Currency, &cfg.MicrosPerCent, &cfg.ReturnBaseURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return payments.Config{}, nil
 	}
@@ -78,9 +79,9 @@ func (s *PaymentsStore) LoadConfig(ctx context.Context) (payments.Config, error)
 func (s *PaymentsStore) ConfigByProvider(ctx context.Context, provider string) (payments.Config, error) {
 	var cfg payments.Config
 	err := s.pool.QueryRow(ctx, `
-		SELECT provider, api_key, webhook_secret, currency, micros_per_cent, return_base_url
+		SELECT provider, api_key, webhook_secret, webhook_id, currency, micros_per_cent, return_base_url
 		FROM payment_provider_configs WHERE provider = $1`, provider).
-		Scan(&cfg.Provider, &cfg.APIKey, &cfg.WebhookSecret, &cfg.Currency, &cfg.MicrosPerCent, &cfg.ReturnBaseURL)
+		Scan(&cfg.Provider, &cfg.APIKey, &cfg.WebhookSecret, &cfg.WebhookID, &cfg.Currency, &cfg.MicrosPerCent, &cfg.ReturnBaseURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return payments.Config{}, fmt.Errorf("%w: %s", payments.ErrUnknownProvider, provider)
 	}

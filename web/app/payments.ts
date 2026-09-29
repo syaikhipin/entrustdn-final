@@ -10,11 +10,13 @@ export { errFrom };
 
 // GatewayConfig is the masked configuration surface the admin sees: which
 // credentials are set (never their values), the exchange rate, and whether
-// top-ups are live.
+// top-ups are live. webhookIDSet is PayPal's third credential (Stripe
+// leaves it unset).
 export interface GatewayConfig {
   provider: string;
   apiKeySet: boolean;
   webhookSecretSet: boolean;
+  webhookIDSet: boolean;
   currency: string;
   microsPerCent: number;
   returnBaseURL: string;
@@ -48,12 +50,15 @@ export function parseGatewayConfig(doc: unknown): GatewayConfig {
   if (typeof d.provider !== "string") throw new Error("gateway config carries no provider string");
   if (typeof d.api_key_set !== "boolean" || typeof d.webhook_secret_set !== "boolean")
     throw new Error("gateway config carries no credential-set flags");
+  if (typeof d.webhook_id_set !== "boolean")
+    throw new Error("gateway config carries no webhook id flag");
   if (typeof d.micros_per_cent !== "number" || !Number.isInteger(d.micros_per_cent))
     throw new Error("gateway config micros_per_cent is not an integer");
   return {
     provider: d.provider,
     apiKeySet: d.api_key_set,
     webhookSecretSet: d.webhook_secret_set,
+    webhookIDSet: d.webhook_id_set,
     currency: typeof d.currency === "string" ? d.currency : "",
     microsPerCent: d.micros_per_cent,
     returnBaseURL: typeof d.return_base_url === "string" ? d.return_base_url : "",
@@ -120,8 +125,9 @@ export async function fetchGatewayConfig(backend: string, token: string): Promis
 }
 
 // saveGatewayConfig stores the gateway configuration (admin). Blank
-// apiKey / webhookSecret keep the stored credential, so rotating one never
-// requires re-typing the other. An empty provider disables top-ups.
+// apiKey / webhookSecret / webhookID keep the stored credential, so
+// rotating one never requires re-typing the others. An empty provider
+// disables top-ups.
 export async function saveGatewayConfig(
   backend: string,
   token: string,
@@ -129,6 +135,7 @@ export async function saveGatewayConfig(
     provider: string;
     apiKey?: string;
     webhookSecret?: string;
+    webhookID?: string;
     currency: string;
     microsPerCent: number;
   },
@@ -140,6 +147,7 @@ export async function saveGatewayConfig(
       provider: body.provider,
       api_key: body.apiKey ?? "",
       webhook_secret: body.webhookSecret ?? "",
+      webhook_id: body.webhookID ?? "",
       currency: body.currency,
       micros_per_cent: body.microsPerCent,
     }),

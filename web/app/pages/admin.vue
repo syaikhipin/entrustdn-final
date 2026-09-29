@@ -85,6 +85,7 @@ const gateway = ref<GatewayConfig | null>(null);
 const gatewayProvider = ref("");
 const gatewayApiKey = ref("");
 const gatewaySecret = ref("");
+const gatewayWebhookID = ref("");
 const gatewayCurrency = ref("");
 const gatewayMicrosPerCent = ref<number | null>(null);
 const gatewayError = ref<string | null>(null);
@@ -195,6 +196,7 @@ function applyGateway(cfg: GatewayConfig) {
   gatewayProvider.value = cfg.provider;
   gatewayApiKey.value = "";
   gatewaySecret.value = "";
+  gatewayWebhookID.value = "";
   gatewayCurrency.value = cfg.currency;
   gatewayMicrosPerCent.value = cfg.microsPerCent > 0 ? cfg.microsPerCent : null;
 }
@@ -211,6 +213,7 @@ async function submitGateway() {
       provider: gatewayProvider.value.trim(),
       apiKey: gatewayApiKey.value,
       webhookSecret: gatewaySecret.value,
+      webhookID: gatewayWebhookID.value.trim(),
       currency: gatewayCurrency.value.trim(),
       microsPerCent: gatewayMicrosPerCent.value ?? 0,
     });
@@ -725,6 +728,7 @@ async function submitDeleteTerm(t: Term) {
             </span>
             <span v-if="gateway.apiKeySet" class="hint"> · API key set</span>
             <span v-if="gateway.webhookSecretSet" class="hint"> · webhook secret set</span>
+            <span v-if="gateway.webhookIDSet" class="hint"> · webhook id set (paypal)</span>
           </p>
 
           <form @submit.prevent="submitGateway">
@@ -737,16 +741,25 @@ async function submitDeleteTerm(t: Term) {
               <input
                 v-model="gatewayApiKey"
                 type="password"
-                :placeholder="gateway.apiKeySet ? 'stored — leave blank to keep' : 'sk_live_…'"
+                :placeholder="gateway.apiKeySet ? 'stored — leave blank to keep' : gateway.provider === 'paypal' ? 'client id' : 'sk_live_…'"
                 autocomplete="off"
               />
             </label>
             <label>
-              Webhook secret
+              {{ gateway.provider === "paypal" ? "Client secret" : "Webhook secret" }}
               <input
                 v-model="gatewaySecret"
                 type="password"
-                :placeholder="gateway.webhookSecretSet ? 'stored — leave blank to keep' : 'whsec_…'"
+                :placeholder="gateway.webhookSecretSet ? 'stored — leave blank to keep' : gateway.provider === 'paypal' ? 'client secret' : 'whsec_…'"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              Webhook id <span class="hint">(paypal only)</span>
+              <input
+                v-model="gatewayWebhookID"
+                type="text"
+                :placeholder="gateway.webhookIDSet ? 'stored — leave blank to keep' : 'whid assigned when the listener URL is registered'"
                 autocomplete="off"
               />
             </label>

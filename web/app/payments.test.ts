@@ -16,6 +16,19 @@ const configDoc = {
   provider: "stripe",
   api_key_set: true,
   webhook_secret_set: true,
+  webhook_id_set: false,
+  currency: "eur",
+  micros_per_cent: 10_000,
+  return_base_url: "https://thresh.example",
+  enabled: true,
+};
+
+// A PayPal config: the third credential (webhook id) is set.
+const paypalConfigDoc = {
+  provider: "paypal",
+  api_key_set: true,
+  webhook_secret_set: true,
+  webhook_id_set: true,
   currency: "eur",
   micros_per_cent: 10_000,
   return_base_url: "https://thresh.example",
@@ -27,6 +40,7 @@ const clearedConfigDoc = {
   provider: "",
   api_key_set: false,
   webhook_secret_set: false,
+  webhook_id_set: false,
   currency: "",
   micros_per_cent: 0,
   return_base_url: "",
@@ -57,11 +71,19 @@ describe("parseGatewayConfig", () => {
       provider: "stripe",
       apiKeySet: true,
       webhookSecretSet: true,
+      webhookIDSet: false,
       currency: "eur",
       microsPerCent: 10_000,
       returnBaseURL: "https://thresh.example",
       enabled: true,
     });
+  });
+
+  it("reads a paypal config with its webhook id flag", () => {
+    const cfg = parseGatewayConfig(paypalConfigDoc);
+    expect(cfg.provider).toBe("paypal");
+    expect(cfg.webhookIDSet).toBe(true);
+    expect(cfg.enabled).toBe(true);
   });
 
   it("reads a cleared config as disabled", () => {
@@ -73,6 +95,11 @@ describe("parseGatewayConfig", () => {
 
   it("refuses a config without credential flags", () => {
     expect(() => parseGatewayConfig({ provider: "stripe", currency: "eur" })).toThrow(/credential-set flags/);
+  });
+
+  it("refuses a config without the webhook id flag", () => {
+    const { webhook_id_set: _, ...missing } = configDoc;
+    expect(() => parseGatewayConfig(missing)).toThrow(/webhook id flag/);
   });
 
   it("refuses a non-integer exchange rate", () => {

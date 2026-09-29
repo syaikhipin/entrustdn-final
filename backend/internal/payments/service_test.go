@@ -606,11 +606,13 @@ func stripeCfg() payments.Config {
 }
 
 // paypalCfg is the second provider's configuration: same shape, its own
-// secret — proof that retention is per provider, not one shared row.
+// secret and webhook id — proof that retention is per provider, not one
+// shared row.
 var paypalCfg = payments.Config{
 	Provider:      "paypal",
 	APIKey:        "pp_test",
 	WebhookSecret: "whsec_paypal",
+	WebhookID:     "whid_paypal",
 	Currency:      "eur",
 	MicrosPerCent: 10_000,
 	ReturnBaseURL: "https://thresh.example",

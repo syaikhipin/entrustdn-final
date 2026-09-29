@@ -128,11 +128,12 @@ func run() error {
 	}
 
 	// Payment gateway (ticket 09, ADR 0004): server-side platform config,
-	// Stripe registered as the first provider (PayPal slots in behind the
-	// same Gateway seam). The webhook route verifies callbacks with the
-	// stored webhook secret.
+	// Stripe and PayPal registered behind the same Gateway seam (ticket 17
+	// added PayPal). The webhook route verifies callbacks with the retained
+	// per-provider configuration.
 	gwRegistry := payments.NewRegistry()
 	gwRegistry.Register(payments.ProviderStripe, payments.NewStripe)
+	gwRegistry.Register(payments.ProviderPayPal, payments.NewPayPal)
 	paymentsStore := postgres.NewPaymentsStore(pool)
 	paymentsSvc := payments.NewService(paymentsStore, paymentsStore.LoadConfig, gwRegistry.GatewayFor)
 
