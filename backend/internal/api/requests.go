@@ -75,6 +75,9 @@ func (h *Handler) registerRequestsRoutes(deps *RequestsDeps) {
 	}
 	h.mux.HandleFunc("POST /api/v1/requests", h.handleCreateRequest)
 	h.mux.HandleFunc("GET /api/v1/requests", h.handleListRequests)
+	// The org-facing commissions: every clarified Request an approved
+	// Farmer Organization may field (the collections form's data source).
+	h.mux.HandleFunc("GET /api/v1/org/requests", h.handleListFieldableRequests)
 	h.mux.HandleFunc("GET /api/v1/requests/{id}", h.handleGetRequest)
 	h.mux.HandleFunc("POST /api/v1/requests/{id}/chat", h.handleRequestChat)
 	h.mux.HandleFunc("PUT /api/v1/requests/{id}/template", h.handleAttachTemplate)
@@ -182,6 +185,45 @@ func (h *Handler) handleListRequests(w http.ResponseWriter, r *http.Request) {
 		docs = append(docs, requestJSON(req))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": docs})
+}
+
+// handleListFieldableRequests serves the org-facing view: every clarified
+// Request an approved Farmer Organization may field, newest first. The
+// consumer's private web-chat never rides this view — the org sees the
+// commission, not the conversation that produced it.
+func (h *Handler) handleListFieldableRequests(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireOrg(w, r); !ok {
+		return
+	}
+	list, err := h.requests.svc.Fieldable(r.Context())
+	if err != nil {
+		apiError(w, http.StatusInternalServerError, "failed to list fieldable requests")
+		return
+	}
+	docs := make([]map[string]any, 0, len(list))
+	for _, req := range list {
+		docs = append(docs, fieldableRequestJSON(req))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"requests": docs})
+}
+
+// fieldableRequestJSON renders one Request for the org view — the
+// commission's public face only: no messages, no spend, no skills.
+func fieldableRequestJSON(r requests.Request) map[string]any {
+	doc := map[string]any{
+		"id":            r.ID,
+		"description":   r.Description,
+		"format":        r.Format,
+		"quality_bar":   r.QualityBar,
+		"budget_micros": r.BudgetMicros,
+		"status":        string(r.Status),
+		"created_at":    r.CreatedAt.Format(timeFormat),
+		"updated_at":    r.UpdatedAt.Format(timeFormat),
+	}
+	if r.Template != nil {
+		doc["template"] = map[string]any{"module_id": r.Template.ModuleID}
+	}
+	return doc
 }
 
 // handleGetRequest serves one request — the consumer's status view.

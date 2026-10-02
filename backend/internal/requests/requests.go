@@ -156,6 +156,9 @@ type Store interface {
 	RequestByID(ctx context.Context, id string) (Request, error)
 	// RequestsByConsumer lists the consumer's requests, newest first.
 	RequestsByConsumer(ctx context.Context, consumerID string) ([]Request, error)
+	// FieldableRequests lists every clarified request, newest first — the
+	// org-facing commissions.
+	FieldableRequests(ctx context.Context) ([]Request, error)
 	// UpdateRequest rewrites the whole record after a chat turn: messages,
 	// matches, spend, status. The conversation is single-writer (the chat
 	// path), so a whole-record update is the honest seam.
@@ -209,6 +212,19 @@ func (m *MemoryStore) RequestsByConsumer(_ context.Context, consumerID string) (
 	var out []Request
 	for _, r := range m.requests {
 		if r.ConsumerID == consumerID {
+			out = append(out, r)
+		}
+	}
+	sortRequests(out)
+	return out, nil
+}
+
+func (m *MemoryStore) FieldableRequests(_ context.Context) ([]Request, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Request
+	for _, r := range m.requests {
+		if r.Status == StatusClarified {
 			out = append(out, r)
 		}
 	}
@@ -345,6 +361,13 @@ func (s *Service) Create(ctx context.Context, consumerID string, n NewRequest) (
 // ByConsumer lists the consumer's requests, newest first.
 func (s *Service) ByConsumer(ctx context.Context, consumerID string) ([]Request, error) {
 	return s.store.RequestsByConsumer(ctx, consumerID)
+}
+
+// Fieldable lists every clarified Request — the commissions an approved
+// Farmer Organization may turn into a Collection. The org-facing view;
+// the consumer's private chat is stripped at the API layer, not here.
+func (s *Service) Fieldable(ctx context.Context) ([]Request, error) {
+	return s.store.FieldableRequests(ctx)
 }
 
 // ByID returns one request after the entitlement check — a stranger's

@@ -284,3 +284,71 @@ func TestStrangersReadRequestsAsNotFound(t *testing.T) {
 		}
 	})
 }
+
+// newActiveOrg registers, verifies, and gets approved a Farmer
+// Organization, returning its login token.
+func newActiveOrg(t *testing.T, srv *httptest.Server, mail *bytes.Buffer, adminToken, email string) string {
+	t.Helper()
+	acct := registerOrg(t, srv, mail, email)
+	if code, _ := postWithToken(t, srv, "/api/v1/admin/applications/decide", adminToken, map[string]any{
+		"account_id": acct["id"], "decision": "approve",
+	}); code != http.StatusOK {
+		t.Fatalf("approve org = %d", code)
+	}
+	return loginWith(t, srv, email, "harvest-2026")
+}
+
+// TestOrgSeesFieldableRequests pins the org-facing view (the collections
+// form's missing data source): an approved Farmer Organization lists
+// clarified Requests — the ones it may field — without the consumer's
+// private chat, and consumer-gated endpoints stay consumer-gated.
+func TestOrgSeesFieldableRequests(t *testing.T) {
+	srv, adminToken, mail, _, agent := newRequestsServer(t)
+	consumerID, token := newConsumer(t, srv, mail, "buyer@example.org")
+	fundConsumer(t, srv, adminToken, consumerID)
+	orgToken := newActiveOrg(t, srv, mail, adminToken, "coop@example.org")
+
+	// One request, still clarifying; one clarified via chat.
+	code, doc := postWithToken(t, srv, "/api/v1/requests", token, map[string]any{
+		"description": "clarifying survey", "format": "csv", "budget_micros": 10_000_000,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (doc: %v)", code, doc)
+	}
+	clarifyingID := doc["request"].(map[string]any)["id"].(string)
+	code, doc = postWithToken(t, srv, "/api/v1/requests", token, map[string]any{
+		"description": "Leinster barley 2026", "format": "csv", "budget_micros": 10_000_000,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create 2 = %d", code)
+	}
+	clarifiedID := doc["request"].(map[string]any)["id"].(string)
+	// The fake agent clarifies on the next turn.
+	agent.reply.Clarified = true
+	code, doc = postWithToken(t, srv, "/api/v1/requests/"+clarifiedID+"/chat", token, map[string]any{"message": "Leinster, CSV, farm-level"})
+	if code != http.StatusOK || doc["clarified"] != true {
+		t.Fatalf("clarify chat = %d clarified=%v (doc: %v)", code, doc["clarified"], doc)
+	}
+
+	// The org's view: the clarified request only, no private chat, and the
+	// consumer endpoint stays consumer-gated for the org token.
+	code, doc = getWithToken(t, srv, "/api/v1/org/requests", orgToken)
+	if code != http.StatusOK {
+		t.Fatalf("org list = %d (doc: %v)", code, doc)
+	}
+	list := doc["requests"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("org sees %d requests, want only the clarified one", len(list))
+	}
+	got := list[0].(map[string]any)
+	if got["id"].(string) != clarifiedID {
+		t.Errorf("org sees %v, want %s", got["id"], clarifiedID)
+	}
+	if _, has := got["messages"]; has {
+		t.Error("org view leaks the consumer's private chat (messages)")
+	}
+	if code, _ := getWithToken(t, srv, "/api/v1/requests", orgToken); code != http.StatusForbidden {
+		t.Errorf("consumer list with org token = %d, want 403", code)
+	}
+	_ = clarifyingID
+}

@@ -188,6 +188,28 @@ func (s *RequestsStore) RequestsByConsumer(ctx context.Context, consumerID strin
 	return out, rows.Err()
 }
 
+// FieldableRequests lists every clarified request, newest first — the
+// org-facing commissions.
+func (s *RequestsStore) FieldableRequests(ctx context.Context) ([]requests.Request, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+requestColumns+` FROM data_requests WHERE status = 'clarified'
+		ORDER BY created_at DESC, id DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list fieldable requests: %w", err)
+	}
+	defer rows.Close()
+
+	var out []requests.Request
+	for rows.Next() {
+		r, err := s.scanRequest(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan request: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // UpdateRequest rewrites the whole record after a chat turn: messages,
 // matches, spend, status — and, ticket 13, the module attachments.
 func (s *RequestsStore) UpdateRequest(ctx context.Context, r requests.Request) error {
