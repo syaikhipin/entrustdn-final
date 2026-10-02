@@ -237,6 +237,21 @@ function detailText(mov: CreditsView["movements"][number]): string {
   return mov.memo || mov.id;
 }
 
+// shortID trims a movement UUID for the ledger table — the full ID rides
+// the title tooltip, and a click copies it (the reference to quote when
+// querying a charge).
+function shortID(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
+async function copyID(id: string) {
+  try {
+    await navigator.clipboard.writeText(id);
+  } catch {
+    // Clipboard denied: the title tooltip still carries the full ID.
+  }
+}
+
 // myDelta sums this account's entries within a movement — the signed effect
 // on the balance the row shows.
 function myDelta(mov: CreditsView["movements"][number]): number {
@@ -481,6 +496,7 @@ function myDelta(mov: CreditsView["movements"][number]): number {
                 <th>What</th>
                 <th>Detail</th>
                 <th class="num">Change</th>
+                <th>ID</th>
               </tr>
             </thead>
             <tbody>
@@ -490,6 +506,13 @@ function myDelta(mov: CreditsView["movements"][number]): number {
                 <td class="hint">{{ detailText(mov) }}</td>
                 <td class="num" :class="myDelta(mov) < 0 ? 'spend' : 'gain'">
                   {{ myDelta(mov) < 0 ? "" : "+" }}{{ formatCredits(myDelta(mov)) }}
+                </td>
+                <td>
+                  <code
+                    class="small id-copy"
+                    :title="`${mov.id} — click to copy`"
+                    @click="copyID(mov.id)"
+                  >{{ shortID(mov.id) }}</code>
                 </td>
               </tr>
             </tbody>
@@ -600,5 +623,8 @@ function myDelta(mov: CreditsView["movements"][number]): number {
 }
 code.small {
   font-size: 0.82rem;
+}
+.id-copy {
+  cursor: pointer;
 }
 </style>
