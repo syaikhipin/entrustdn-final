@@ -115,9 +115,14 @@ func TestStoreMovementsByScopeNewestFirst(t *testing.T) {
 	if len(movs) != 3 {
 		t.Fatalf("got %d movements, want 3", len(movs))
 	}
-	// Newest first: 30, then 20, then 10. Each movement carries both legs.
+	// Newest first: 30, then 20, then 10. Each movement carries both legs
+	// and its own ID — the scan must assign the scanned id, not leave the
+	// zero value (the "movement carries no id" UI bug).
 	var sum int64
 	for _, m := range movs {
+		if m.ID == "" {
+			t.Error("movement carries no id: the scan never assigned m.ID")
+		}
 		if len(m.Entries) != 2 {
 			t.Errorf("movement %s carries %d entries, want 2", m.ID, len(m.Entries))
 		}

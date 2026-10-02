@@ -221,6 +221,7 @@ func (s *CreditsStore) MovementsByScope(ctx context.Context, scope credits.Scope
 			return nil, fmt.Errorf("scan movement row: %w", err)
 		}
 		if _, seen := byID[id]; !seen {
+			mov.ID = id // the scan read the id; the movement must carry it
 			m := mov
 			m.Entries = []credits.Entry{}
 			if detail.Model != "" {
