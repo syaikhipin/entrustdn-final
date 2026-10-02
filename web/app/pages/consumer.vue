@@ -198,10 +198,11 @@ const hasFilters = computed(
   () => query.value.trim() !== "" || Object.values(picked.value).some((v) => v),
 );
 
-// maybeUnpick toggles a facet radio off when the consumer clicks the
-// selected term again (radios alone can't go back to "all").
-function maybeUnpick(category: TaxonomyCategory, value: string) {
-  if (picked.value[category] === value) picked.value[category] = undefined;
+// togglePick sets or clears one axis's pick: clicking a different term
+// picks it; clicking the selected term again clears the axis back to
+// "all" (a plain radio can't).
+function togglePick(category: TaxonomyCategory, value: string) {
+  picked.value[category] = picked.value[category] === value ? undefined : value;
 }
 
 function clearFilters() {
@@ -338,12 +339,14 @@ function myDelta(mov: CreditsView["movements"][number]): number {
             <div v-for="section in facetSections" :key="section.category" class="facet">
               <h4>{{ categoryLabel(section.category) }}</h4>
               <label v-for="v in section.values" :key="v.value" class="facet-value">
+                <!-- One handler, on the input: v-model writes the pick; a
+                     click on the already-selected term clears the axis
+                     back to "all" (a plain radio can't). -->
                 <input
-                  v-model="picked[section.category]"
                   type="radio"
-                  name=""
-                  :value="v.value"
-                  @change="maybeUnpick(section.category, v.value)"
+                  :name="`facet-${section.category}`"
+                  :checked="picked[section.category] === v.value"
+                  @click="togglePick(section.category, v.value)"
                 />
                 {{ v.label }} <span class="hint">({{ v.count }})</span>
               </label>

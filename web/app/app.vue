@@ -11,13 +11,17 @@ const backendURL = useBackendURL();
 
 async function logout() {
   const { token } = useSession();
-  try {
-    if (token.value) await (await import("~/auth")).logout(backendURL, token.value);
-  } catch {
-    // The local session ends regardless.
-  }
+  const dying = token.value;
+  // Local session ends first: a slow or dead backend must never hold the
+  // logout hostage.
   signOut();
   navigateTo("/");
+  if (!dying) return;
+  try {
+    await (await import("~/auth")).logout(backendURL, dying);
+  } catch {
+    // The token dies server-side on TTL; the local session is already gone.
+  }
 }
 </script>
 

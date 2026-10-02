@@ -108,8 +108,8 @@ function flowFor(kind: string) {
             v-else
             class="bars"
             role="img"
-            :aria-label="`Requests per day, ${stats.requestsOverTime[0].day} to ${
-              stats.requestsOverTime[stats.requestsOverTime.length - 1].day
+            :aria-label="`Requests per day, ${stats.requestsOverTime[0]!.day} to ${
+              stats.requestsOverTime[stats.requestsOverTime.length - 1]!.day
             }, peak ${maxDaily}`"
           >
             <button
