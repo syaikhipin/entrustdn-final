@@ -33,7 +33,7 @@ ADMIN_LOGIN=$(curl -s -X POST "$B/api/v1/login" -H 'Content-Type: application/js
 ATOK=$(J "['session']['token']" <<<"$ADMIN_LOGIN")
 # Seed a price book for the live model + grant the consumer spend room.
 curl -s -X POST "$B/api/v1/admin/pricing" -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' \
-  -d '{"inference":[{"model":"Qwen3.8-27B","input_micros_per_1k":2500,"cached_input_micros_per_1k":1250,"output_micros_per_1k":10000}],"data":{"cached_asset_micros_per_unit":1000,"unique_micros_per_unit":5000}}' >/dev/null
+  -d '{"inference":[{"model":"Qwen3.8-27B","input_micros_per_1k":2500,"cached_input_micros_per_1k":1250,"output_micros_per_1k":10000},{"model":"glm-5.3-flash","input_micros_per_1k":1000,"cached_input_micros_per_1k":200,"output_micros_per_1k":3000}],"data":{"cached_asset_micros_per_unit":1000,"unique_micros_per_unit":5000}}' >/dev/null
 # Grant the consumer spend room (chat charges the budget).
 CAID=$(J "['account']['id']" <<<"$CLOGIN")
 curl -s -X POST "$B/api/v1/admin/credits/grant" -H "Authorization: Bearer $ATOK" -H 'Content-Type: application/json' \

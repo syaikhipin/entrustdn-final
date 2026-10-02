@@ -37,11 +37,27 @@ await page.waitForTimeout(1500);
 ck("#4 reload keeps session", !page.url().includes("/login"), `landed at ${page.url()}`);
 
 // --- #3: facet radios check, filter, and toggle off ---
+// The ledger must render visible movement IDs (the mov.ID fix): the
+// credits table carries an ID column with the short form.
+{
+  // Ensure at least one movement exists (the consumer walk's account is
+  // granted credits by the e2e loop that seeds it).
+  await page.goto(`${BASE}/consumer`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1000);
+}
+const idCells = await page.locator(".ledger td .id-copy").count();
+const hasIDColumn = (await page.locator(".ledger th", { hasText: "ID" }).count()) > 0;
+ck("credits table shows an ID column", hasIDColumn);
+ck("ledger rows show non-empty movement IDs", idCells === 0 || (await page.locator(".id-copy").first().textContent()) !== "");
+
+// --- #3: facet radios check, filter, and toggle off ---
 // Seed one shared asset via the org API so facets exist.
 {
   const oStamp = sh(`grep -o "loop-o[0-9]*" /tmp/thresh-backend.log | tail -1 | grep -o "[0-9]*"`).trim();
   const oLogin = JSON.parse(sh(`curl -s -X POST ${API}/api/v1/login -H 'Content-Type: application/json' -d '{"email":"loop-o${oStamp}@t.dev","password":"pass-word-1"}'`));
-  sh(`printf 'farm,crop,yield_t_h\\nF1,winter wheat,8.2\\n' > /tmp/seed-${STAMP}.csv && curl -s -X POST ${API}/api/v1/assets -H "Authorization: Bearer ${oLogin.session.token}" -F "file=@/tmp/seed-${STAMP}.csv;type=text/csv" -F "name=UI loop yields ${STAMP}" -F "description=Winter cereal yields for the consumer UI loop"`);
+  // Text fields must precede the file part — the upload handler stops
+  // reading at the file part (bounded-memory MultipartReader).
+  sh(`printf 'farm,crop,yield_t_h\\nF1,winter wheat,8.2\\n' > /tmp/seed-${STAMP}.csv && curl -s -X POST ${API}/api/v1/assets -H "Authorization: Bearer ${oLogin.session.token}" -F "name=UI loop yields ${STAMP}" -F "description=Winter cereal yields for the consumer UI loop" -F "file=@/tmp/seed-${STAMP}.csv;type=text/csv"`);
   await page.goto(`${BASE}/consumer`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1200);
 }
