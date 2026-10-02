@@ -8,6 +8,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
@@ -19,11 +21,21 @@ type Client struct {
 	http    *http.Client
 }
 
-// New returns a Client pointed at the agent's base URL.
+// New returns a Client pointed at the agent's base URL. The HTTP timeout
+// defaults to 120s and rides THRESH_AGENT_TIMEOUT_S: a clarify or
+// conversation turn through a real model gateway takes 10–30s (often more
+// with long threads), and the old 10s default killed every slow turn at
+// the charging step ("agent could not be reached").
 func New(baseURL string) *Client {
+	timeout := 120 * time.Second
+	if v := os.Getenv("THRESH_AGENT_TIMEOUT_S"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			timeout = time.Duration(parsed) * time.Second
+		}
+	}
 	return &Client{
 		baseURL: baseURL,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		http:    &http.Client{Timeout: timeout},
 	}
 }
 

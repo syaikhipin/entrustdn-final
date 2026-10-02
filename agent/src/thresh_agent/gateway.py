@@ -117,6 +117,9 @@ def gateway_from_env() -> OpenAICompatibleGateway:
 
     THRESH_MODEL_GATEWAY_BASE_URL (default: OpenAI), THRESH_MODEL_GATEWAY_KEY
     (falls back to OPENAI_API_KEY), THRESH_MODEL (default: gpt-4o-mini).
+    THRESH_MODEL_GATEWAY_TIMEOUT_S defaults to 120 — real gateways take
+    10-30s per turn; the old httpx-transport default read timeout cut
+    conversation opens mid-generation.
     """
     api_key = os.environ.get(
         "THRESH_MODEL_GATEWAY_KEY", os.environ.get("OPENAI_API_KEY", "")
@@ -132,4 +135,5 @@ def gateway_from_env() -> OpenAICompatibleGateway:
         base_url=os.environ.get(
             "THRESH_MODEL_GATEWAY_BASE_URL", "https://api.openai.com/v1"
         ),
+        timeout=float(os.environ.get("THRESH_MODEL_GATEWAY_TIMEOUT_S", "120")),
     )
