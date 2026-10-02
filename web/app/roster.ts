@@ -37,3 +37,26 @@ export async function listMembers(backend: string, token: string): Promise<Membe
   });
   return parseMemberList(doc);
 }
+
+// createMember adds one Member to the org's roster. The contact names the
+// Channel the agent reaches them on: "email:…", "whatsapp:…", "telegram:…".
+export async function createMember(
+  backend: string,
+  token: string,
+  input: { displayName: string; contact: string },
+): Promise<Member> {
+  const doc = await apiCall<{ member: unknown }>(backend, "/api/v1/members", {
+    method: "POST",
+    headers: authedHeader(token),
+    body: JSON.stringify({ display_name: input.displayName, contact: input.contact }),
+  });
+  return parseMember(doc.member);
+}
+
+// deleteMember removes one Member from the roster.
+export async function deleteMember(backend: string, token: string, id: string): Promise<void> {
+  await apiCall(backend, `/api/v1/members/${id}`, {
+    method: "DELETE",
+    headers: authedHeader(token),
+  });
+}

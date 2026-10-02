@@ -270,3 +270,51 @@ export async function detachConnector(
   });
   return parseRequest(doc.request);
 }
+
+// --- Org-facing view (the collections form's data source) ---
+
+// FieldableRequest is the org's face of one clarified Request: the
+// commission only — the consumer's private chat never rides this view.
+export interface FieldableRequest {
+  id: string;
+  description: string;
+  format: string;
+  qualityBar: string;
+  budgetMicros: number;
+  status: RequestStatus;
+  template: TemplateAttachment | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function parseFieldableRequest(doc: unknown): FieldableRequest {
+  const d = assertObject(doc, "fieldable request");
+  // The org view must never carry the consumer's private chat — a backend
+  // regression that leaks it fails loudly here rather than rendering.
+  if ("messages" in d) throw new Error("fieldable request leaks the private chat");
+  if ("spent_micros" in d) throw new Error("fieldable request leaks the consumer's spend");
+  let template: TemplateAttachment | null = null;
+  if (d.template !== undefined && d.template !== null) {
+    const t = assertObject(d.template, "fieldable request template");
+    template = { moduleId: assertString(t.module_id, "fieldable request template module_id") };
+  }
+  return {
+    id: assertString(d.id, "fieldable request id"),
+    description: assertString(d.description, "fieldable request description"),
+    format: assertString(d.format, "fieldable request format"),
+    qualityBar: typeof d.quality_bar === "string" ? d.quality_bar : "",
+    budgetMicros: assertInt(d.budget_micros, "fieldable request budget_micros"),
+    status: parseStatus(d.status),
+    template,
+    createdAt: assertString(d.created_at, "fieldable request created_at"),
+    updatedAt: assertString(d.updated_at, "fieldable request updated_at"),
+  };
+}
+
+// fetchFieldableRequests lists every clarified Request the org may field.
+export async function fetchFieldableRequests(backend: string, token: string): Promise<FieldableRequest[]> {
+  const doc = await apiCall<{ requests: unknown[] }>(backend, "/api/v1/org/requests", {
+    headers: authedHeader(token),
+  });
+  return doc.requests.map(parseFieldableRequest);
+}

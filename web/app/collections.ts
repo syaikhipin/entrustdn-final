@@ -259,5 +259,6 @@ export async function downloadDelivery(backend: string, token: string, id: strin
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  // Safari cancels the transfer if the URL is revoked in the same tick.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }

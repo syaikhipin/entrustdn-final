@@ -11,6 +11,7 @@ import {
   attachSkill,
   detachTemplate,
   detachSkill,
+  fetchFieldableRequests,
 } from "./requests";
 
 // A /api/v1/requests document exactly as the Go backend serializes it:
@@ -227,6 +228,59 @@ describe("detachTemplate / detachSkill", () => {
       expect(calls[0]!.init.method).toBe("DELETE");
       expect(calls[1]!.path).toBe("http://backend.test/api/v1/requests/abc123/skills/mod-skill-1");
       expect(calls[1]!.init.method).toBe("DELETE");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+// The org-facing view: clarified commissions without the private chat.
+describe("fetchFieldableRequests", () => {
+  it("GETs /api/v1/org/requests and parses the org view", async () => {
+    const fieldableDoc = {
+      id: "abc123",
+      description: "Spring barley yields across Leinster",
+      format: "csv",
+      quality_bar: "Farm-level records",
+      budget_micros: 10_000_000,
+      status: "clarified",
+      template: { module_id: "mod-tpl-1" },
+      created_at: "2026-09-23T09:59:00Z",
+      updated_at: "2026-09-23T10:00:01Z",
+    };
+    const calls: Array<{ path: string; init?: RequestInit }> = [];
+    const fetchMock = (async (input: string | URL, init?: RequestInit) => {
+      calls.push({ path: String(input), init });
+      return new Response(JSON.stringify({ requests: [fieldableDoc] }), { status: 200 });
+    }) as typeof fetch;
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    try {
+      const got = await fetchFieldableRequests("http://backend.test", "tok");
+      expect(calls[0]!.path).toBe("http://backend.test/api/v1/org/requests");
+      expect(got).toHaveLength(1);
+      expect(got[0]!.status).toBe("clarified");
+      expect(got[0]!.template?.moduleId).toBe("mod-tpl-1");
+      // The org view never carries the private chat — nothing to parse.
+      expect("messages" in got[0]!).toBe(false);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("refuses an org document leaking the private chat", async () => {
+    const leaker = {
+      id: "abc123", description: "x", format: "csv",
+      budget_micros: 1, status: "clarified",
+      messages: [{ role: "consumer", body: "secret", created_at: "2026-09-23T10:00:00Z" }],
+      created_at: "2026-09-23T09:59:00Z", updated_at: "2026-09-23T09:59:00Z",
+    };
+    const fetchMock = (async () =>
+      new Response(JSON.stringify({ requests: [leaker] }), { status: 200 })) as typeof fetch;
+    const original = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    try {
+      await expect(fetchFieldableRequests("http://backend.test", "tok")).rejects.toThrow();
     } finally {
       globalThis.fetch = original;
     }

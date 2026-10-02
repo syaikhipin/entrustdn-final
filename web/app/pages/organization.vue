@@ -20,7 +20,7 @@ import {
   type Asset,
 } from "~/assets";
 import { erasePseudonyms, listPseudonyms, type PseudonymList } from "~/pseudonyms";
-import { listMembers, type Member } from "~/roster";
+import { createMember, deleteMember, listMembers, type Member } from "~/roster";
 import {
   createCollection,
   listCollections,
@@ -28,8 +28,9 @@ import {
   statusLabel,
   syncCollection,
   type Collection,
+  type Conversation,
 } from "~/collections";
-import { fetchMyRequests, type DataRequest } from "~/requests";
+import { fetchFieldableRequests, type FieldableRequest } from "~/requests";
 import { fetchMyEarnings, type EarningsView } from "~/earnings";
 import { formatCredits } from "~/credits";
 import {
@@ -81,10 +82,11 @@ const correcting = ref<string | null>(null);
 const correctionPicks = ref<Partial<Record<TaxonomyCategory, string>>>({});
 const correctionError = ref<string | null>(null);
 
-// Collections state (ticket 12): the roster and clarified requests the
-// creation form picks from, and the collections themselves.
+// Collections state (ticket 12): the roster and fieldable requests the
+// creation form picks from, the collections themselves, and the member
+// resume links opened per collection.
 const members = ref<Member[]>([]);
-const clarifiedRequests = ref<DataRequest[]>([]);
+const fieldableRequests = ref<FieldableRequest[]>([]);
 const collections = ref<Collection[]>([]);
 const colRequestID = ref("");
 const colMemberIDs = ref<string[]>([]);
@@ -92,6 +94,16 @@ const colQuestions = ref("");
 const colDeadline = ref("");
 const colError = ref<string | null>(null);
 const syncing = ref<string | null>(null);
+
+// Roster form state: display name plus a channel:address contact.
+const memName = ref("");
+const memContact = ref("");
+const memError = ref<string | null>(null);
+
+// Resume links by member id for the collection being driven — the org
+// hands each member their resumable link (the web Channel's medium).
+const resumeLinks = ref<Record<string, string>>({});
+const copiedMember = ref<string | null>(null);
 
 // Earnings state (ticket 15): the org's Revenue Share — the split in
 // force, totals, and the per-Member breakdown.
@@ -153,9 +165,9 @@ function termsFor(category: TaxonomyCategory): Term[] {
 
 // --- Collections (ticket 12) ---
 
-// refreshCollections loads the roster, the org's clarified requests, and
-// the collections themselves. The roster and requests feed the creation
-// form; their failures degrade to a create-form-less list.
+// refreshCollections loads the roster, the fieldable requests, and the
+// collections themselves. The roster and requests feed the creation form;
+// their failures degrade to a create-form-less list.
 async function refreshCollections() {
   if (!token.value) return;
   try {
@@ -165,16 +177,44 @@ async function refreshCollections() {
     colError.value = e instanceof Error ? e.message : String(e);
   }
   try {
-    const reqs = await fetchMyRequests(backendURL, token.value);
-    clarifiedRequests.value = reqs.filter((r) => r.status === "clarified");
+    fieldableRequests.value = await fetchFieldableRequests(backendURL, token.value);
   } catch (e) {
-    clarifiedRequests.value = [];
+    fieldableRequests.value = [];
     colError.value = e instanceof Error ? e.message : String(e);
   }
   try {
     collections.value = await listCollections(backendURL, token.value);
   } catch (e) {
     colError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+// submitMember adds one Member to the roster.
+async function submitMember() {
+  if (!token.value) return;
+  memError.value = null;
+  try {
+    await createMember(backendURL, token.value, {
+      displayName: memName.value,
+      contact: memContact.value,
+    });
+    memName.value = "";
+    memContact.value = "";
+    await refreshCollections();
+  } catch (e) {
+    memError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+// removeMember drops one Member from the roster after a confirm.
+async function removeMember(m: Member) {
+  if (!token.value) return;
+  memError.value = null;
+  try {
+    await deleteMember(backendURL, token.value, m.id);
+    await refreshCollections();
+  } catch (e) {
+    memError.value = e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -245,8 +285,9 @@ async function submitSync(id: string) {
 
 // startConversations opens each member's gathering conversation for one
 // collection — every conversation carries the request ID so the sync
-// matches it. Members already covered by an open conversation (the sync
-// shows their items with rounds) are skipped: asking twice is over-surveying.
+// matches it, and each member's resumable link is captured below. Members
+// already covered by an open conversation (the sync shows their items with
+// rounds) are skipped: asking twice is over-surveying.
 async function startConversations(c: Collection) {
   if (!token.value) return;
   syncing.value = c.id;
@@ -256,23 +297,39 @@ async function startConversations(c: Collection) {
     let opened = 0;
     for (const it of c.items) {
       if (it.rounds.length > 0 || it.status !== "collecting") continue;
-      await startGatheringConversation(backendURL, token.value, {
+      const conv: Conversation = await startGatheringConversation(backendURL, token.value, {
         memberId: it.memberId,
         memberName: it.memberName,
         requestId: c.requestId,
         questions: [it.question],
       });
+      resumeLinks.value[it.memberId] = `${backendURL}/api/v1/member/resume/${conv.resumeToken}`;
       opened++;
     }
     notice.value =
       opened > 0
-        ? `Opened ${opened} conversation${opened === 1 ? "" : "s"} — hand each member their resumable link, then sync here as answers arrive.`
+        ? `Opened ${opened} conversation${opened === 1 ? "" : "s"} — copy each member's resumable link below, then sync here as answers arrive.`
         : "Every member already has a conversation — sync to pick up new answers.";
     await refreshCollections();
   } catch (e) {
     colError.value = e instanceof Error ? e.message : String(e);
   } finally {
     syncing.value = null;
+  }
+}
+
+// copyResume puts one member's resumable link on the clipboard.
+async function copyResume(memberId: string) {
+  const link = resumeLinks.value[memberId];
+  if (!link) return;
+  try {
+    await navigator.clipboard.writeText(link);
+    copiedMember.value = memberId;
+    setTimeout(() => {
+      if (copiedMember.value === memberId) copiedMember.value = null;
+    }, 2000);
+  } catch {
+    colError.value = "The browser refused clipboard access — copy the link from the address bar instead.";
   }
 }
 
@@ -450,7 +507,9 @@ async function openDownload(a: Asset) {
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    // Safari cancels the transfer if the URL is revoked in the same tick;
+    // the revoke rides the next macrotask.
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
@@ -669,19 +728,53 @@ async function openDownload(a: Asset) {
         <p>
           Turn a clarified Request into a gathering effort: pick the members,
           list the questions, and sync as answers arrive. Quality triggers
-          check every answer — bad ones get re-asked automatically, and a
-          member who can't produce a good answer blocks their item with the
-          reason surfaced.
+          check every answer — bad ones get re-asked, and a member who
+          can't produce a good answer blocks their item with the reason
+          surfaced.
         </p>
         <p v-if="colError" class="error-text">{{ colError }}</p>
 
-        <form v-if="members.length && clarifiedRequests.length" class="collection-form" @submit.prevent="submitCollection">
+        <!-- Roster management: members are contact points, never accounts -->
+        <div class="roster-block">
+          <h4>Roster</h4>
+          <p v-if="members.length === 0" class="hint">
+            No members yet — add one below to open collections.
+          </p>
+          <table v-else class="assets">
+            <thead>
+              <tr><th>Member</th><th>Contact</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in members" :key="m.id">
+                <td>{{ m.displayName }}</td>
+                <td><code class="small">{{ m.contact }}</code></td>
+                <td class="actions">
+                  <button class="danger" @click="removeMember(m)">Remove</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <form class="member-form" @submit.prevent="submitMember">
+            <label>
+              Display name
+              <input v-model="memName" type="text" placeholder="e.g. Máire Ní Cheallaigh" required />
+            </label>
+            <label>
+              Contact — channel:address
+              <input v-model="memContact" type="text" placeholder="email:maire@example.org" required />
+            </label>
+            <button class="secondary" type="submit">Add member</button>
+          </form>
+          <p v-if="memError" class="error-text">{{ memError }}</p>
+        </div>
+
+        <form v-if="fieldableRequests.length" class="collection-form" @submit.prevent="submitCollection">
           <h4>Open a collection</h4>
           <label>
             Request
             <select v-model="colRequestID" required>
               <option value="" disabled>Choose a clarified request…</option>
-              <option v-for="r in clarifiedRequests" :key="r.id" :value="r.id">
+              <option v-for="r in fieldableRequests" :key="r.id" :value="r.id">
                 {{ r.description }} ({{ r.format }})
               </option>
             </select>
@@ -712,8 +805,8 @@ async function openDownload(a: Asset) {
           </p>
         </form>
         <p v-else class="hint">
-          Collections need roster members and a clarified request —
-          {{ members.length ? "no clarified request yet" : "no members on the roster yet" }}.
+          No clarified requests to field yet — once a Data Consumer's
+          request is clarified it appears here.
         </p>
 
         <p v-if="collections.length === 0" class="hint">No collections yet.</p>
@@ -743,6 +836,14 @@ async function openDownload(a: Asset) {
                     {{ itemProgress(it.status) }}
                   </span>
                   <span v-if="it.reasks" class="hint">({{ it.reasks }} re-ask{{ it.reasks === 1 ? "" : "s" }})</span>
+                  <button
+                    v-if="resumeLinks[it.memberId]"
+                    class="link copy-link"
+                    type="button"
+                    @click="copyResume(it.memberId)"
+                  >
+                    {{ copiedMember === it.memberId ? "Link copied" : "Copy member link" }}
+                  </button>
                 </span>
               </td>
               <td class="items-cell">
@@ -918,6 +1019,34 @@ code.small {
 .edit-actions {
   display: flex;
   gap: 0.5rem;
+}
+.roster-block {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.roster-block h4,
+.collection-form h4 {
+  margin: 0 0 0.5rem;
+}
+.member-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.member-form label {
+  margin-bottom: 0;
+  flex: 1;
+  min-width: 14rem;
+}
+.member-form button {
+  margin-bottom: 0.2rem;
+}
+.copy-link {
+  margin-left: 0.4rem;
+  font-size: 0.82rem;
 }
 .pill:not(.ok):not(.warn):not(.bad) {
   background: var(--bg);
