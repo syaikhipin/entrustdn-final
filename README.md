@@ -23,6 +23,15 @@ Domain vocabulary: `CONTEXT.md`. Decisions: `docs/adr/`.
 
 ### 📸 Real UI Captures (from production)
 
+### Homepage
+![Homepage](docs/gifs/real_homepage.gif)
+
+### Admin Dashboard
+![Admin](docs/gifs/real_admin.gif)
+
+### Admin Stats
+![Admin Stats](docs/gifs/real_admin_stats.gif)
+
 ### Data Catalog
 ![Catalog](docs/gifs/real_catalog.gif)
 
