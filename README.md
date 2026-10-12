@@ -31,6 +31,39 @@ Animated demos of each business process, captured from the live deployment:
 ### 5. Custom Skills
 ![Custom Skills](docs/gifs/custom_skills.gif)
 
+### 6. Data Request Process
+![Data Request](docs/gifs/data_request.gif)
+
+### 7. Farmer Supply Process
+![Farmer Supply](docs/gifs/farmer_supply.gif)
+
+### 8. Credit Calculation (Real Case)
+![Credit Calculation](docs/gifs/credit_calc.gif)
+
+### 9. Catalog Browsing
+![Catalog Browsing](docs/gifs/catalog_browse.gif)
+
+### 10. Admin Approval Flow
+![Admin Approval](docs/gifs/admin_approval.gif)
+
+### 11. Agent Clarification + Memory
+![Agent Clarification](docs/gifs/agent_clarify.gif)
+
+### 12. Payment & Revenue Share
+![Payment Share](docs/gifs/payment_share.gif)
+
+### 13. Data Upload + Anonymization
+![Data Upload](docs/gifs/data_upload.gif)
+
+### 14. Email Verification Flow
+![Verification](docs/gifs/verification.gif)
+
+### 15. Terms of Service Flow
+![ToS Flow](docs/gifs/tos_flow.gif)
+
+### 16. System Status (Live)
+![System Status](docs/gifs/system_status.gif)
+
 ## Quick start
 
 ```bash
