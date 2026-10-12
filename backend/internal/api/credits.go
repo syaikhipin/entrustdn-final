@@ -214,6 +214,12 @@ func (h *Handler) handleGetPricing(w http.ResponseWriter, r *http.Request) {
 	}
 	rules, err := h.credits.deps.Rules(r.Context())
 	if err != nil {
+		// No price book yet is a normal pilot state — the frontend shows an
+		// editable empty book. Anything else is a real failure.
+		if errors.Is(err, credits.ErrNoPricingRule) {
+			apiError(w, http.StatusNotFound, "no price book configured")
+			return
+		}
 		apiError(w, http.StatusInternalServerError, "failed to load pricing rules")
 		return
 	}
