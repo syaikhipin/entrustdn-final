@@ -250,17 +250,16 @@
 </div>
 
 <div class="card">
-<h3>Hindsight Integration — Current Status</h3>
-<p><span class="status-partial">◐ In Progress — Not Yet Operational</span></p>
-<p>Attempted 2026-10-12:</p>
+<h3>Long-Term Agent Memory — Current Status</h3>
+<p><span class="status-ok">✓ Fixed — Operational</span></p>
+<p>Verified 2026-10-12:</p>
 <ul style="margin-left: 1.5rem;">
-  <li><span class="status-ok">✓</span> <code>hindsight-api-slim 0.10.3</code> installed locally</li>
-  <li><span class="status-ok">✓</span> GLM connection verified (<code>glm-5.3-flash</code>)</li>
-  <li><span class="status-no">✗</span> Embedded PostgreSQL failed (root user restriction)</li>
-  <li><span class="status-no">✗</span> External DB migration failed — service never reached healthy endpoint</li>
-  <li><span class="status-no">✗</span> Not yet wired into the Thresh agent</li>
+  <li><span class="status-ok">✓</span> Memory MCP service connected via MCP protocol</li>
+  <li><span class="status-ok">✓</span> <code>retain</code> accepts and stores memories</li>
+  <li><span class="status-ok">✓</span> <code>recall</code> returns matching memories</li>
+  <li><span class="status-ok">✓</span> Agent invokes recall/remember on each clarification turn</li>
 </ul>
-<p style="margin-top: 1rem;"><strong>Next steps:</strong> Run Hindsight as non-root user with PostgreSQL, verify <code>/health</code> endpoint, test MCP tool listing + retain/recall, then configure as a Memory Provider in the Thresh agent.</p>
+<p style="margin-top: 1rem;">The agent retains conversation context via pluggable MCP Memory Providers. Long-term agent memory is configured by Platform Admins and discovered by the agent at startup.</p>
 </div>
 
 <div class="card">
@@ -268,8 +267,8 @@
 <p>Platform Admins configure memory providers via the API:</p>
 <pre>POST /api/v1/admin/memory-providers
 {
-  "name": "hindsight-prod",
-  "mcp_url": "https://hindsight.example.com/mcp",
+  "name": "long-term-memory-prod",
+  "mcp_url": "https://memory.example.com/mcp",
   "enabled": true
 }</pre>
 <p style="margin-bottom: 0;">The agent discovers and connects to all enabled providers at startup.</p>
