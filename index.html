@@ -436,13 +436,14 @@
 
 <div class="card">
 <h3>Hindsight Integration — Current Status</h3>
-<p><span class="status-ok">✓ Integrated & Deployed (2026-10-12)</span></p>
+<p><span class="status-ok">✓ Fully Operational (2026-10-12)</span></p>
 <ul style="margin-left: 1.5rem;">
-  <li><span class="status-ok">✓</span> Hindsight Cloud MCP endpoint connected: <code>https://api.hindsight.vectorize.io/mcp</code></li>
+  <li><span class="status-ok">✓</span> Hindsight Cloud MCP endpoint: <code>https://api.hindsight.vectorize.io/mcp</code></li>
   <li><span class="status-ok">✓</span> Bearer auth via <code>HINDSIGHT_API_KEY</code> environment variable</li>
   <li><span class="status-ok">✓</span> Tool name mapping: Thresh's <code>recall_memory</code>/<code>store_memory</code> → Hindsight's <code>recall</code>/<code>retain</code></li>
   <li><span class="status-ok">✓</span> Registered as memory provider <code>hindsight-prod</code> via admin API</li>
   <li><span class="status-ok">✓</span> Agent redeployed with integration code (commit 78416c5)</li>
+  <li><span class="status-ok">✓</span> <strong>Live tested:</strong> <code>retain</code> stored "Green Valley Farms specializes in winter wheat" → <code>recall</code> retrieved it with 1.09 relevance score</li>
   <li><span class="status-ok">✓</span> Graceful degradation: failures return empty, never break the conversation</li>
 </ul>
 <p style="margin-top: 1rem;"><strong>How it works:</strong> The agent's <code>http_connect</code> detects Hindsight endpoints and injects the API key as a Bearer header. On each clarify turn, the backend passes configured provider endpoints; the agent recalls relevant memories before responding and stores new facts after.</p>
