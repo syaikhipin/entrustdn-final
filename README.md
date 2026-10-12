@@ -14,55 +14,48 @@ Domain vocabulary: `CONTEXT.md`. Decisions: `docs/adr/`.
 
 ## Business Process Showcase
 
-Animated demos of each business process, captured from the live deployment:
+### 📸 Real UI Captures (from production)
 
-### 1. User Registration
+### Data Catalog
+![Catalog](docs/gifs/real_catalog.gif)
+
+### Ledger & Credits
+![Ledger](docs/gifs/real_ledger.gif)
+
+### Long-Term Agent Memory
+![Agent Memory](docs/gifs/real_memory.gif)
+
+### Data Requests
+![Requests](docs/gifs/real_requests.gif)
+
+### Module Registry
+![Modules](docs/gifs/real_modules.gif)
+
+### Organization Dashboard
+![Organization](docs/gifs/real_organization.gif)
+
+### User Registration
 ![Registration](docs/gifs/thresh_registration_demo.gif)
 
-### 2. User Login
+### User Login
 ![Login](docs/gifs/thresh_login_demo.gif)
 
-### 3. Long-Term Agent Memory
-![Agent Memory](docs/gifs/agent_memory.gif)
+### System Status
+![Status](docs/gifs/system_status.gif)
 
-### 4. Multi-Organization Data Flow
-![Multi-org Data](docs/gifs/multiorg_data.gif)
+### 🎨 Process Illustrations
 
-### 5. Custom Skills
-![Custom Skills](docs/gifs/custom_skills.gif)
+### Data Upload Flow
+![Upload](docs/gifs/illus_upload.gif)
 
-### 6. Data Request Process
-![Data Request](docs/gifs/data_request.gif)
+### Farmer Supply Chain
+![Supply](docs/gifs/illus_supply.gif)
 
-### 7. Farmer Supply Process
-![Farmer Supply](docs/gifs/farmer_supply.gif)
+### Credit Calculation
+![Credits](docs/gifs/illus_credits.gif)
 
-### 8. Credit Calculation (Real Case)
-![Credit Calculation](docs/gifs/credit_calc.gif)
-
-### 9. Catalog Browsing
-![Catalog Browsing](docs/gifs/catalog_browse.gif)
-
-### 10. Admin Approval Flow
-![Admin Approval](docs/gifs/admin_approval.gif)
-
-### 11. Agent Clarification + Memory
-![Agent Clarification](docs/gifs/agent_clarify.gif)
-
-### 12. Payment & Revenue Share
-![Payment Share](docs/gifs/payment_share.gif)
-
-### 13. Data Upload + Anonymization
-![Data Upload](docs/gifs/data_upload.gif)
-
-### 14. Email Verification Flow
-![Verification](docs/gifs/verification.gif)
-
-### 15. Terms of Service Flow
-![ToS Flow](docs/gifs/tos_flow.gif)
-
-### 16. System Status (Live)
-![System Status](docs/gifs/system_status.gif)
+### Admin Approval
+![Approval](docs/gifs/illus_approval.gif)
 
 ## Quick start
 
