@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 )
@@ -112,6 +113,11 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 // classify-at-ingest loop stays closed at runtime. The method satisfies the
 // assets.Categorizer seam, so the ingest service can hold the taxonomy
 // service itself as its classifier.
+//
+// When THRESH_JEV_API_KEY is set, classification goes through the Jev
+// decision model (TypeSafe via MindsHub) for semantic understanding the
+// keyword matcher misses; the keyword classifier remains the fallback when
+// Jev is unreachable or unconfigured.
 func (s *Service) Classify(ctx context.Context, text string) []Assignment {
 	terms, err := s.store.Terms(ctx)
 	if err != nil {
@@ -119,6 +125,9 @@ func (s *Service) Classify(ctx context.Context, text string) []Assignment {
 		// error): the upload proceeds uncategorized rather than lost.
 		log.Printf("taxonomy: load terms for classification: %v", err)
 		return nil
+	}
+	if key := os.Getenv("THRESH_JEV_API_KEY"); key != "" {
+		return NewJevClassifier(terms, key).Classify(ctx, text)
 	}
 	return NewClassifier(terms).Classify(ctx, text)
 }

@@ -13,4 +13,11 @@ export default defineNuxtConfig({
       backendBaseURL: process.env.NUXT_PUBLIC_BACKEND_BASE_URL || '',
     },
   },
+  // Allow tunneled hosts (e.g. *.lhr.life) in dev — the public demo URL
+  // changes on every reconnect, so a fixed allowlist is impractical.
+  vite: {
+    server: {
+      allowedHosts: true,
+    },
+  },
 })

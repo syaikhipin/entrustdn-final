@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/syaikhipin/entrustdn-final/backend/internal/contract"
@@ -101,9 +103,19 @@ type Handler struct {
 
 // allowedOrigins lists the browser origins allowed to call this API across
 // origins. Dev default covers the Nuxt dev server; production origins get
-// added via config as deployment lands.
+// added via config as deployment lands. THRESH_ALLOWED_ORIGINS (comma-separated)
+// adds extra origins at runtime — used for public tunnel testing where the
+// frontend origin rotates on every reconnect.
 var allowedOrigins = map[string]bool{
 	"http://localhost:3000": true,
+}
+
+func init() {
+	for _, o := range strings.Split(os.Getenv("THRESH_ALLOWED_ORIGINS"), ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			allowedOrigins[o] = true
+		}
+	}
 }
 
 // NewHandler wires routes and returns the backend's HTTP handler.
