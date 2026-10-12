@@ -257,9 +257,9 @@
 </div>
 
 <div class="card">
-<h3>3. Hindsight Memory Integration</h3>
-<p>Store memory via <code>retain</code> → Hindsight Cloud MCP → Recall via <code>recall</code> → Agent uses memory in conversation</p>
-<img src="gifs/hindsight_memory.gif" alt="Hindsight memory process demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>3. Long-Term Agent Memory</h3>
+<p>Store memory → Long-term memory service → Recall relevant context → Agent uses memory in conversation</p>
+<img src="gifs/agent_memory.gif" alt="Long-term memory process demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
@@ -306,7 +306,7 @@
 
 <div class="card">
 <h3>11. Agent Clarification + Memory</h3>
-<p>Consumer message → Hindsight recall → Agent responds with context → New memory stored</p>
+<p>Consumer message → Memory recall → Agent responds with context → New memory stored</p>
 <img src="gifs/agent_clarify.gif" alt="Agent clarification demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
@@ -528,7 +528,7 @@
 <h3>Design: Pluggable MCP Memory Providers</h3>
 <p>Thresh implements <strong>no memory architecture of its own</strong>. Following the Hermes Agent pattern (ADR-0003), the agent runtime connects to <strong>external memory services over MCP</strong>:</p>
 <ul style="margin-left: 1.5rem; margin-bottom: 1rem;">
-  <li>mem0, Hindsight, supermemory, Honcho, ...</li>
+  <li>mem0, supermemory, Honcho, ...</li>
   <li>Configured by Platform Admin, swappable per deployment</li>
   <li>Multiple providers can be connected simultaneously</li>
 </ul>
@@ -536,18 +536,18 @@
 </div>
 
 <div class="card">
-<h3>Hindsight Integration — Current Status</h3>
+<h3>Long-Term Agent Memory — Current Status</h3>
 <p><span class="status-ok">✓ Fully Operational (2026-10-12)</span></p>
 <ul style="margin-left: 1.5rem;">
-  <li><span class="status-ok">✓</span> Hindsight Cloud MCP endpoint: <code>https://api.hindsight.vectorize.io/mcp</code></li>
-  <li><span class="status-ok">✓</span> Bearer auth via <code>HINDSIGHT_API_KEY</code> environment variable</li>
-  <li><span class="status-ok">✓</span> Tool name mapping: Thresh's <code>recall_memory</code>/<code>store_memory</code> → Hindsight's <code>recall</code>/<code>retain</code></li>
-  <li><span class="status-ok">✓</span> Registered as memory provider <code>hindsight-prod</code> via admin API</li>
-  <li><span class="status-ok">✓</span> Agent redeployed with integration code (commit 78416c5)</li>
-  <li><span class="status-ok">✓</span> <strong>Live tested:</strong> <code>retain</code> stored "Green Valley Farms specializes in winter wheat" → <code>recall</code> retrieved it with 1.09 relevance score</li>
+  <li><span class="status-ok">✓</span> MCP-based memory provider connected</li>
+  <li><span class="status-ok">✓</span> Bearer auth via environment variable</li>
+  <li><span class="status-ok">✓</span> Tool name mapping: Thresh's <code>recall_memory</code>/<code>store_memory</code> → provider's native tools</li>
+  <li><span class="status-ok">✓</span> Registered as memory provider via admin API</li>
+  <li><span class="status-ok">✓</span> Agent redeployed with integration code</li>
+  <li><span class="status-ok">✓</span> <strong>Live tested:</strong> stored "Green Valley Farms specializes in winter wheat" → recalled with 1.09 relevance score</li>
   <li><span class="status-ok">✓</span> Graceful degradation: failures return empty, never break the conversation</li>
 </ul>
-<p style="margin-top: 1rem;"><strong>How it works:</strong> The agent's <code>http_connect</code> detects Hindsight endpoints and injects the API key as a Bearer header. On each clarify turn, the backend passes configured provider endpoints; the agent recalls relevant memories before responding and stores new facts after.</p>
+<p style="margin-top: 1rem;"><strong>How it works:</strong> On each clarify turn, the backend passes configured provider endpoints; the agent recalls relevant memories before responding and stores new facts after.</p>
 </div>
 
 <div class="card">
@@ -555,11 +555,10 @@
 <p>Platform Admins configure memory providers via the API:</p>
 <pre>POST /api/v1/admin/memory-providers
 {
-  "name": "hindsight-prod",
-  "mcp_url": "https://hindsight.example.com/mcp",
-  "enabled": true
+  "name": "memory-prod",
+  "endpoint": "https://memory-provider.example.com/mcp"
 }</pre>
-<p style="margin-bottom: 0;">The agent discovers and connects to all enabled providers at startup.</p>
+<p style="margin-bottom: 0;">The agent discovers and connects to all configured providers per turn.</p>
 </div>
 </section>
 
