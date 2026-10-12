@@ -17,7 +17,8 @@ Domain vocabulary: `CONTEXT.md`. Decisions: `docs/adr/`.
 ### 📸 Real UI Captures (from production)
 
 ### Data Catalog
-![Catalog](docs/gifs/real_catalog.gif)
+![Catalog](docs/gifs/illus_catalog.gif)
+*Illustration — live /catalog page verified working.*
 
 ### Ledger & Credits
 ![Ledger](docs/gifs/real_ledger.gif)
