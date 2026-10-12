@@ -1,0 +1,34 @@
+# Render Blueprint for Thresh Backend (Go)
+# Deploy via: Render Dashboard → New → Blueprint → Connect repo → Select this file
+# Or: https://dashboard.render.com/select-repo?type=blueprint
+
+services:
+  - type: web
+    name: thresh-backend
+    runtime: go
+    plan: free
+    region: oregon
+    buildCommand: go build -o /opt/render/project/src/server ./cmd/api
+    startCommand: /opt/render/project/src/server
+    healthCheckPath: /api/v1/status
+    envVars:
+      - key: DATABASE_URL
+        sync: false  # Set manually: postgres://user:pass@host:port/db?sslmode=require
+      - key: THRESH_ALLOWED_ORIGINS
+        value: https://frontend-sooty-one-6c2l65azaf.vercel.app
+      - key: THRESH_AGENT_URL
+        value: https://thresh-agent.onrender.com
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: eu-central-2
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: THRESH_ADMIN_EMAIL
+        sync: false
+      - key: THRESH_ADMIN_PASSWORD
+        sync: false

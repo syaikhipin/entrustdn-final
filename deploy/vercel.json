@@ -1,0 +1,1 @@
+{"buildCommand":"npm run build","env":{"NUXT_PUBLIC_BACKEND_BASE_URL":"https://thresh-backend.onrender.com"},"framework":"nuxtjs","outputDirectory":".output/public"}
