@@ -39,6 +39,17 @@
   nav .container { display: flex; gap: 1.5rem; padding-top: 0; padding-bottom: 0; }
   nav a { color: var(--text); text-decoration: none; font-size: 0.9rem; }
   nav a:hover { color: var(--accent); }
+  .stack-badges { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; margin: 1.5rem 0; }
+  .stack-badges img { height: 28px; border-radius: 4px; }
+  .logo-banner { text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%); border-radius: 12px; margin-bottom: 1.5rem; border: 1px solid #38bdf8; }
+  .logo-banner h2 { border: none; margin: 0 0 0.5rem; padding: 0; font-size: 1.4rem; }
+  .catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .catalog-item { background: var(--card); border-radius: 12px; padding: 1.25rem; border: 1px solid #334155; }
+  .catalog-item h4 { color: var(--accent); margin-bottom: 0.5rem; font-size: 1.05rem; }
+  .catalog-item .meta { font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.5rem; }
+  .catalog-item .tags { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.75rem; }
+  .catalog-item .tag { background: #0f172a; padding: 0.25rem 0.6rem; border-radius: 12px; font-size: 0.75rem; color: var(--accent); border: 1px solid #334155; }
+  .price { color: var(--green); font-weight: bold; font-size: 1.1rem; }
 </style>
 </head>
 <body>
@@ -46,6 +57,8 @@
 <nav>
   <div class="container">
     <a href="#overview">Overview</a>
+    <a href="#stack">Tech Stack</a>
+    <a href="#catalog">Catalog</a>
     <a href="#walkthrough">Walkthrough</a>
     <a href="#modules">Module System</a>
     <a href="#entrust">Entrust DC</a>
@@ -57,8 +70,24 @@
 <div class="container">
 
 <header>
+  <div class="logo-banner">
+    <h2>🛡️ EntrustDN Project</h2>
+    <p style="margin-bottom: 0; color: #cbd5e1;">Trustworthy Data Sharing Infrastructure for Agricultural Research<br><small>MSCA — Marie Skłodowska-Curie Actions | European Commission</small></p>
+  </div>
   <h1>🌾 Thresh</h1>
   <p>Agentic Agricultural Data-Sharing Platform — Walkthrough & Entrust DC Requirements</p>
+
+  <div class="stack-badges" id="stack-badges">
+    <img src="https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go">
+    <img src="https://img.shields.io/badge/Nuxt.js-00DC82?style=for-the-badge&logo=nuxtdotjs&logoColor=white" alt="Nuxt.js">
+    <img src="https://img.shields.io/badge/Vue.js-4FC08D?style=for-the-badge&logo=vuedotjs&logoColor=white" alt="Vue.js">
+    <img src="https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
+    <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+    <img src="https://img.shields.io/badge/LangGraph-FF6B6B?style=for-the-badge&logo=langchain&logoColor=white" alt="LangGraph">
+    <img src="https://img.shields.io/badge/S3_Compatible-569A31?style=for-the-badge&logo=amazons3&logoColor=white" alt="S3">
+    <img src="https://img.shields.io/badge/MCP-7C3AED?style=for-the-badge&logoColor=white" alt="MCP">
+    <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
+  </div>
   <div class="badges">
     <span class="badge live">● Frontend Live</span>
     <span class="badge live">● Backend Live</span>
@@ -86,6 +115,61 @@
   <div class="step"><strong>Agent</strong><br>Python + LangGraph<br><small>Render</small></div>
 </div>
 <p style="margin-top: 1rem; margin-bottom: 0;">Plus: <strong>PostgreSQL</strong> (Aiven) for data, <strong>S3-compatible storage</strong> (idrive e2) for assets, and <strong>GLM</strong> (z.ai) as the model gateway.</p>
+</div>
+</section>
+
+<section id="catalog">
+<h2>Data Catalog</h2>
+<p>Example datasets available on the platform. All files are stored in <strong>S3-compatible object storage</strong> (idrive e2, bucket <code>databricks</code>) — no local disk storage, ensuring persistence across Render's ephemeral filesystem.</p>
+
+<div class="catalog-grid">
+  <div class="catalog-item">
+    <h4>🌾 Winter Wheat Yield 2024</h4>
+    <div class="meta">Green Valley Farms • 5 records • CSV</div>
+    <p>Comprehensive wheat yield data including variety performance (Costello, Graham, Laureate), irrigation methods, and fertilizer application rates across 5 fields.</p>
+    <div class="tags">
+      <span class="tag">crop: wheat</span>
+      <span class="tag">type: yield</span>
+      <span class="tag">region: ireland</span>
+    </div>
+    <p style="margin-top: 0.75rem; margin-bottom: 0;"><span class="price">150 credits</span></p>
+  </div>
+
+  <div class="catalog-item">
+    <h4>🐄 Dairy Production 2024</h4>
+    <div class="meta">Sunrise Agriculture Co-op • 4 herds • CSV</div>
+    <p>Milk production records across 4 herds (Holstein-Friesian, Jersey, Norwegian Red) with fat/protein content, somatic cell counts, and grazing data.</p>
+    <div class="tags">
+      <span class="tag">crop: dairy</span>
+      <span class="tag">type: production</span>
+      <span class="tag">region: ireland</span>
+    </div>
+    <p style="margin-top: 0.75rem; margin-bottom: 0;"><span class="price">200 credits</span></p>
+  </div>
+
+  <div class="catalog-item">
+    <h4>🧪 Soil Health Survey</h4>
+    <div class="meta">Emerald Fields Collective • 5 plots • CSV</div>
+    <p>Detailed soil analysis: pH, organic matter, NPK levels, moisture content across different soil types (Loam, Clay Loam, Sandy Loam, Silt Loam).</p>
+    <div class="tags">
+      <span class="tag">type: soil</span>
+      <span class="tag">type: survey</span>
+      <span class="tag">region: ireland</span>
+    </div>
+    <p style="margin-top: 0.75rem; margin-bottom: 0;"><span class="price">100 credits</span></p>
+  </div>
+</div>
+
+<div class="card">
+<h3>💾 Storage Architecture</h3>
+<p>All data assets are stored in <strong>S3-compatible object storage</strong>, not on Render's ephemeral disk:</p>
+<ul style="margin-left: 1.5rem; margin-bottom: 0;">
+  <li><strong>Provider:</strong> idrive e2 (S3-compatible)</li>
+  <li><strong>Endpoint:</strong> <code>g7h4.fra3.idrivee2-51.com</code></li>
+  <li><strong>Bucket:</strong> <code>databricks</code></li>
+  <li><strong>Why S3:</strong> Render's filesystem is ephemeral — files are lost on redeploy/restart. S3 ensures permanent, durable storage.</li>
+  <li><strong>Access:</strong> Server-side only — clients never touch object storage directly (ADR-0006)</li>
+</ul>
 </div>
 </section>
 
