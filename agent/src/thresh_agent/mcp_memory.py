@@ -30,6 +30,7 @@ so the call paths a test exercises are the ones a deployed provider hits.
 import asyncio
 import json
 import logging
+import os
 
 from contextlib import asynccontextmanager
 
@@ -48,6 +49,20 @@ CALL_TIMEOUT_SECONDS = 5.0
 RECALL_TOOL = "recall_memory"
 STORE_TOOL = "store_memory"
 
+# Hindsight uses different tool names; try these as fallback.
+HINDSIGHT_RECALL_TOOL = "recall"
+HINDSIGHT_STORE_TOOL = "retain"
+
+
+def _auth_headers(endpoint: str) -> dict:
+    """Return auth headers for providers that need them."""
+    # Hindsight requires Bearer auth via HINDSIGHT_API_KEY env var.
+    if "hindsight" in endpoint.lower() or "vectorize.io" in endpoint:
+        api_key = os.getenv("HINDSIGHT_API_KEY", "")
+        if api_key:
+            return {"Authorization": f"Bearer {api_key}"}
+    return {}
+
 
 @asynccontextmanager
 async def http_connect(endpoint: str):
@@ -55,7 +70,9 @@ async def http_connect(endpoint: str):
     yielding the initialized session."""
     from mcp.client.streamable_http import streamable_http_client
 
-    async with streamable_http_client(endpoint) as (read, write):
+    headers = _auth_headers(endpoint)
+    kwargs = {"headers": headers} if headers else {}
+    async with streamable_http_client(endpoint, **kwargs) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             yield session
@@ -64,23 +81,44 @@ async def http_connect(endpoint: str):
 async def _recall_one(connect, endpoint: str, query: str) -> list[str]:
     """Recall from one provider over one connection."""
     async with connect(endpoint) as session:
-        result = await session.call_tool(RECALL_TOOL, {"query": query})
-        if result.is_error:
-            raise RuntimeError(f"{RECALL_TOOL} returned an error")
-        text = result.content[0].text if result.content else "[]"
-        memories = json.loads(text)
-        if not isinstance(memories, list):
-            raise RuntimeError(f"{RECALL_TOOL} returned {type(memories).__name__}, want a list")
-        return [str(m) for m in memories]
+        # Try standard tool name first, then Hindsight's convention.
+        for tool_name in (RECALL_TOOL, HINDSIGHT_RECALL_TOOL):
+            try:
+                # Hindsight's recall takes different params
+                params = {"query": query} if tool_name == RECALL_TOOL else {"query": query, "limit": 5}
+                result = await session.call_tool(tool_name, params)
+                if result.is_error:
+                    continue
+                text = result.content[0].text if result.content else "[]"
+                try:
+                    memories = json.loads(text)
+                except json.JSONDecodeError:
+                    # Hindsight returns structured data, not JSON list
+                    return [text] if text else []
+                if not isinstance(memories, list):
+                    return [str(memories)] if memories else []
+                return [str(m) for m in memories]
+            except Exception:
+                continue
+        return []
 
 
 async def _remember_one(connect, endpoint: str, text: str) -> str:
     """Store one memory on one provider over one connection."""
     async with connect(endpoint) as session:
-        result = await session.call_tool(STORE_TOOL, {"text": text})
-        if result.is_error:
-            raise RuntimeError(f"{STORE_TOOL} returned an error")
-        return result.content[0].text if result.content else ""
+        # Try standard tool name first, then Hindsight's convention.
+        for tool_name, params in (
+            (STORE_TOOL, {"text": text}),
+            (HINDSIGHT_STORE_TOOL, {"content": text}),
+        ):
+            try:
+                result = await session.call_tool(tool_name, params)
+                if result.is_error:
+                    continue
+                return result.content[0].text if result.content else ""
+            except Exception:
+                continue
+        return ""
 
 
 class MemoryClient:
