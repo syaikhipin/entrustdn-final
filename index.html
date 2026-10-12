@@ -61,6 +61,7 @@
     <a href="#catalog">Catalog</a>
     <a href="#walkthrough">Walkthrough</a>
     <a href="#modules">Module System</a>
+    <a href="#work-packages">Work Packages</a>
     <a href="#entrust">Entrust DC</a>
     <a href="#memory">Memory MCP</a>
     <a href="#deployment">Live Deployment</a>
@@ -319,6 +320,106 @@
 </table>
 </section>
 
+<section id="work-packages">
+<h2>EntrustDN Work Packages Mapping</h2>
+<p>Thresh addresses the three core Work Packages of the <a href="https://entrustdn.eu/research-work-packages/" style="color: var(--accent);">EnTrust Doctoral Network</a> (MSCA Grant 101073381):</p>
+
+<div class="card">
+<h3>WP1: Digital Technology Adoption</h3>
+<p><em>"To increase data adoption from farmers... focussing on smaller farmers assistance in adoption of innovative and affordable digital technologies."</em></p>
+<table class="req-table">
+<tr><th>WP1 Objective</th><th>Thresh Implementation</th><th>Status</th></tr>
+<tr>
+  <td>Affordable technologies for local adoption</td>
+  <td>Free-tier deployment (Render + Vercel + Aiven). No infrastructure cost for pilot farmers.</td>
+  <td class="status-ok">✓</td>
+</tr>
+<tr>
+  <td>Unlock data potential at local level</td>
+  <td>Farmer Organizations upload datasets; Jev classifier auto-categorizes; catalog makes data discoverable.</td>
+  <td class="status-ok">✓</td>
+</tr>
+<tr>
+  <td>Exemplary tools for smallholders</td>
+  <td>Web interface (no app install). Agent Skills provide domain expertise (e.g., wheat disease diagnosis).</td>
+  <td class="status-ok">✓</td>
+</tr>
+</table>
+</div>
+
+<div class="card">
+<h3>WP2: Data Governance Practices for Agri-Data</h3>
+<p><em>"Develop and test data governance practices based on open standards that enable fair, trusted and transparent data provision."</em></p>
+<table class="req-table">
+<tr><th>WP2 Objective</th><th>Thresh Implementation</th><th>Status</th></tr>
+<tr>
+  <td>Fair data sharing</td>
+  <td>Revenue Share: Farmer Organizations receive portion of Request payments via double-entry Ledger.</td>
+  <td class="status-ok">✓</td>
+</tr>
+<tr>
+  <td>Trusted data provision</td>
+  <td>Provenance tracking on every data item. Taxonomy assignments with source (<code>classifier</code> vs <code>org</code>).</td>
+  <td class="status-ok">✓</td>
+</tr>
+<tr>
+  <td>Transparent provision</td>
+  <td>Open API, audit trail via Ledger, Terms of Service versioning with per-account acceptance records.</td>
+  <td class="status-ok">✓</td>
+</tr>
+<tr>
+  <td>Open standards</td>
+  <td>MCP (Model Context Protocol) for memory providers and connectors. S3-compatible storage. OpenAPI-style REST.</td>
+  <td class="status-ok">✓</td>
+</tr>
+<tr>
+  <td>Privacy protection</td>
+  <td>Anonymization at ingest (PII stripped). GDPR erasure via pseudonym maps. Server-side S3 only (ADR-0006).</td>
+  <td class="status-ok">✓</td>
+</tr>
+<tr>
+  <td>Data sovereignty</td>
+  <td>Farmers retain ownership. Org corrections override classifier. Data localization via EU-region storage.</td>
+  <td class="status-ok">✓</td>
+</tr>
+</table>
+</div>
+
+<div class="card">
+<h3>WP3: Business Models Innovation</h3>
+<p><em>"Test various types of innovation business models... scenarios demonstrating how agri-data can be exploited and value shared fairly."</em></p>
+<table class="req-table">
+<tr><th>WP3 Objective</th><th>Thresh Implementation</th><th>Status</th></tr>
+<tr>
+  <td>Agri-data exploitation scenarios</td>
+  <td>Data Consumers commission Collections; browse Catalog; purchase Assets. Multiple revenue scenarios supported.</td>
+  <td class="status-ok">✓</td>
+</tr>
+<tr>
+  <td>Fair value sharing</td>
+  <td>Credit system with configurable Revenue Share splits. Platform Admin sets pricing rules.</td>
+  <td class="status-ok">✓</td>
+</tr>
+<tr>
+  <td>Business model innovation</td>
+  <td>Module system enables new service offerings: custom Agent Skills, Process Templates for specialized workflows.</td>
+  <td class="status-ok">✓</td>
+</tr>
+</table>
+</div>
+
+<div class="card">
+<h3>Trustworthiness Framework Alignment</h3>
+<p>Per the EnTrust conceptual framework (Cybersecurity + Data Sovereignty + Trustworthiness):</p>
+<ul style="margin-left: 1.5rem;">
+  <li><strong>Control & Autonomy:</strong> Farmers decide what to share, correct classifications, set prices</li>
+  <li><strong>Transparency:</strong> Explainable AI (Jev confidence scores), Ledger audit trail, provenance metadata</li>
+  <li><strong>Privacy:</strong> Anonymization pipeline, GDPR erasure, no client-side storage access</li>
+  <li><strong>Data Localization:</strong> EU-region infrastructure (Aiven EU, idrive e2 EU-Central, Render EU option)</li>
+</ul>
+</div>
+</section>
+
 <section id="memory">
 <h2>Memory MCP — Status</h2>
 
@@ -335,16 +436,16 @@
 
 <div class="card">
 <h3>Hindsight Integration — Current Status</h3>
-<p><span class="status-partial">◐ In Progress — Not Yet Operational</span></p>
-<p>Attempted 2026-10-12:</p>
+<p><span class="status-ok">✓ Integrated & Deployed (2026-10-12)</span></p>
 <ul style="margin-left: 1.5rem;">
-  <li><span class="status-ok">✓</span> <code>hindsight-api-slim 0.10.3</code> installed locally</li>
-  <li><span class="status-ok">✓</span> GLM connection verified (<code>glm-5.3-flash</code>)</li>
-  <li><span class="status-no">✗</span> Embedded PostgreSQL failed (root user restriction)</li>
-  <li><span class="status-no">✗</span> External DB migration failed — service never reached healthy endpoint</li>
-  <li><span class="status-no">✗</span> Not yet wired into the Thresh agent</li>
+  <li><span class="status-ok">✓</span> Hindsight Cloud MCP endpoint connected: <code>https://api.hindsight.vectorize.io/mcp</code></li>
+  <li><span class="status-ok">✓</span> Bearer auth via <code>HINDSIGHT_API_KEY</code> environment variable</li>
+  <li><span class="status-ok">✓</span> Tool name mapping: Thresh's <code>recall_memory</code>/<code>store_memory</code> → Hindsight's <code>recall</code>/<code>retain</code></li>
+  <li><span class="status-ok">✓</span> Registered as memory provider <code>hindsight-prod</code> via admin API</li>
+  <li><span class="status-ok">✓</span> Agent redeployed with integration code (commit 78416c5)</li>
+  <li><span class="status-ok">✓</span> Graceful degradation: failures return empty, never break the conversation</li>
 </ul>
-<p style="margin-top: 1rem;"><strong>Next steps:</strong> Run Hindsight as non-root user with PostgreSQL, verify <code>/health</code> endpoint, test MCP tool listing + retain/recall, then configure as a Memory Provider in the Thresh agent.</p>
+<p style="margin-top: 1rem;"><strong>How it works:</strong> The agent's <code>http_connect</code> detects Hindsight endpoints and injects the API key as a Bearer header. On each clarify turn, the backend passes configured provider endpoints; the agent recalls relevant memories before responding and stores new facts after.</p>
 </div>
 
 <div class="card">
