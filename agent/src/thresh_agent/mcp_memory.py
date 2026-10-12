@@ -95,6 +95,12 @@ async def _recall_one(connect, endpoint: str, query: str) -> list[str]:
                 except json.JSONDecodeError:
                     # Hindsight returns structured data, not JSON list
                     return [text] if text else []
+                # Hindsight wraps results: {"results": [{"text": "...", ...}, ...]}
+                if isinstance(memories, dict) and "results" in memories:
+                    results = memories["results"]
+                    if isinstance(results, list):
+                        return [str(r.get("text", r)) if isinstance(r, dict) else str(r) for r in results]
+                    return []
                 if not isinstance(memories, list):
                     return [str(memories)] if memories else []
                 return [str(m) for m in memories]
