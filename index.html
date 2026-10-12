@@ -241,103 +241,90 @@
 </section>
 
 <section id="demo-gifs">
-<h2>Business Process Showcase — Animated Demos</h2>
-<p>Each business process below is demonstrated as an animated GIF, captured from the live deployment.</p>
+<h2>Business Process Showcase — Live Captures & Illustrations</h2>
+<p>Real screenshots from the production deployment at <code>entrustdn-final.vercel.app</code>, plus illustrated flows for processes without dedicated UI.</p>
+
+<h3 style="color: var(--accent); margin-top: 2rem;">📸 Real UI Captures</h3>
 
 <div class="card">
-<h3>1. User Registration</h3>
-<p>Homepage → Registration form → Fill details → Select role → Ready to submit</p>
-<img src="gifs/thresh_registration_demo.gif" alt="Registration process demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>Data Catalog</h3>
+<p>Browse shared datasets with search and taxonomy filters. Real capture from /catalog.</p>
+<img src="gifs/real_catalog.gif" alt="Data catalog" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>2. User Login</h3>
-<p>Login form → Enter email → Enter password → Ready to log in</p>
-<img src="gifs/thresh_login_demo.gif" alt="Login process demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>Ledger & Credits</h3>
+<p>Credit balance, movement history, revenue share. Real capture from /ledger.</p>
+<img src="gifs/real_ledger.gif" alt="Ledger" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>3. Long-Term Agent Memory</h3>
-<p>Store memory → Long-term memory service → Recall relevant context → Agent uses memory in conversation</p>
-<img src="gifs/agent_memory.gif" alt="Long-term memory process demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>Long-Term Agent Memory</h3>
+<p>Memory provider status and configuration. Real capture from /memory.</p>
+<img src="gifs/real_memory.gif" alt="Agent memory" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>4. Multi-Organization Data Flow</h3>
-<p>3 Farmer Organizations → Each uploads datasets → All stored in S3 (not Render ephemeral disk)</p>
-<img src="gifs/multiorg_data.gif" alt="Multi-organization data flow demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>Data Requests</h3>
+<p>Create requests, clarify with agent. Real capture from /requests.</p>
+<img src="gifs/real_requests.gif" alt="Requests" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>5. Custom Skills Business Process</h3>
-<p>Upload Agent Skill → Upload Process Template → Admin reviews → Attach to Request → Agent applies skill</p>
-<img src="gifs/custom_skills.gif" alt="Custom skills process demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>Module Registry</h3>
+<p>Custom skills and process templates. Real capture from /modules.</p>
+<img src="gifs/real_modules.gif" alt="Modules" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>6. Data Request Process</h3>
-<p>Consumer creates Request → Agent clarifies → Budget approved → Collection starts</p>
-<img src="gifs/data_request.gif" alt="Data request process demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>Organization Dashboard</h3>
+<p>Upload datasets, manage assets, view earnings. Real capture from /organization.</p>
+<img src="gifs/real_organization.gif" alt="Organization dashboard" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>7. Farmer Supply Process</h3>
-<p>Farmer notified → Uploads via channel → Anonymization → Asset created in S3</p>
-<img src="gifs/farmer_supply.gif" alt="Farmer supply process demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>User Registration</h3>
+<p>Homepage → Registration form → Fill details → Select role. Real capture.</p>
+<img src="gifs/thresh_registration_demo.gif" alt="Registration" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>8. Credit Calculation (Real Case)</h3>
-<p>Consumer pays 500 credits → Asset delivered (150) → Revenue split: Farmer 105 (70%), Platform 45 (30%) → Ledger updated</p>
-<img src="gifs/credit_calc.gif" alt="Credit calculation demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>User Login</h3>
+<p>Login form → Enter credentials → Dashboard. Real capture.</p>
+<img src="gifs/thresh_login_demo.gif" alt="Login" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>9. Catalog Browsing</h3>
-<p>Browse catalog → Filter by taxonomy → View pricing → Select asset for Request</p>
-<img src="gifs/catalog_browse.gif" alt="Catalog browsing demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>System Status</h3>
+<p>Backend OK + Agent reachable (v0.1.0). Real capture from /status.</p>
+<img src="gifs/system_status.gif" alt="System status" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+</div>
+
+<h3 style="color: var(--accent); margin-top: 2rem;">🎨 Process Illustrations</h3>
+<p>Animated illustrations for multi-step processes without dedicated UI pages.</p>
+
+<div class="card">
+<h3>Data Upload Flow</h3>
+<p>Select file → Upload to S3 → Auto-anonymize → AI classification.</p>
+<img src="gifs/illus_upload.gif" alt="Data upload illustration" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>10. Admin Approval Flow</h3>
-<p>Org registers → Email verified → Admin reviews → Approved, can upload data</p>
-<img src="gifs/admin_approval.gif" alt="Admin approval demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>Farmer Supply Chain</h3>
+<p>Farmer notified → Collects data → Submits via channel → Quality check.</p>
+<img src="gifs/illus_supply.gif" alt="Farmer supply illustration" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>11. Agent Clarification + Memory</h3>
-<p>Consumer message → Memory recall → Agent responds with context → New memory stored</p>
-<img src="gifs/agent_clarify.gif" alt="Agent clarification demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>Credit Calculation</h3>
+<p>500 credits budget → 150 dataset price → 70/30 revenue split → Ledger updated.</p>
+<img src="gifs/illus_credits.gif" alt="Credit calculation illustration" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 
 <div class="card">
-<h3>12. Payment & Revenue Share</h3>
-<p>Credits purchased → Request completed → Auto settlement → Farmer org balance updated</p>
-<img src="gifs/payment_share.gif" alt="Payment and revenue share demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
-</div>
-
-<div class="card">
-<h3>13. Data Upload + Anonymization</h3>
-<p>Select CSV → Upload to S3 → Auto anonymize (strip PII) → Jev taxonomy classification</p>
-<img src="gifs/data_upload.gif" alt="Data upload demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
-</div>
-
-<div class="card">
-<h3>14. Email Verification Flow</h3>
-<p>Register → Verification email → Click link → Verified, awaits admin approval</p>
-<img src="gifs/verification.gif" alt="Email verification demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
-</div>
-
-<div class="card">
-<h3>15. Terms of Service Flow</h3>
-<p>View ToS v1.0 → User accepts → Acceptance timestamped → Audit trail for compliance</p>
-<img src="gifs/tos_flow.gif" alt="Terms of service demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
-</div>
-
-<div class="card">
-<h3>16. System Status (Live)</h3>
-<p>Real screenshots: Status page shows Backend OK + Agent reachable (v0.1.0) → Homepage with platform status</p>
-<img src="gifs/system_status.gif" alt="System status demo" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
+<h3>Admin Approval</h3>
+<p>Register → Verify email → Admin review → Approved.</p>
+<img src="gifs/illus_approval.gif" alt="Admin approval illustration" style="max-width: 100%; border-radius: 8px; border: 1px solid #334155;">
 </div>
 </section>
 
