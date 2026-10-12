@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Thresh — Walkthrough & Entrust DC Requirements</title>
+<style>
+  :root { --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --accent: #38bdf8; --green: #4ade80; --yellow: #facc15; --red: #f87171; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+  .container { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; }
+  header { text-align: center; padding: 3rem 0 2rem; border-bottom: 1px solid #334155; margin-bottom: 2rem; }
+  header h1 { font-size: 2.5rem; color: var(--accent); margin-bottom: 0.5rem; }
+  header p { color: #94a3b8; font-size: 1.1rem; }
+  .badges { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; margin-top: 1rem; }
+  .badge { background: var(--card); padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.85rem; border: 1px solid #334155; }
+  .badge.live { border-color: var(--green); color: var(--green); }
+  h2 { color: var(--accent); margin: 2.5rem 0 1rem; font-size: 1.6rem; border-bottom: 2px solid #334155; padding-bottom: 0.5rem; }
+  h3 { color: var(--text); margin: 1.5rem 0 0.75rem; font-size: 1.2rem; }
+  p { margin-bottom: 1rem; }
+  .card { background: var(--card); border-radius: 12px; padding: 1.5rem; margin: 1rem 0; border: 1px solid #334155; }
+  .card h3 { margin-top: 0; color: var(--accent); }
+  .flow { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+  .step { background: var(--card); padding: 0.8rem 1.2rem; border-radius: 8px; border: 1px solid var(--accent); font-size: 0.9rem; }
+  .arrow { color: var(--accent); font-size: 1.2rem; }
+  .req-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  .req-table th, .req-table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #334155; }
+  .req-table th { background: var(--card); color: var(--accent); }
+  .status-ok { color: var(--green); font-weight: bold; }
+  .status-partial { color: var(--yellow); font-weight: bold; }
+  .status-no { color: var(--red); font-weight: bold; }
+  code { background: #0f172a; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.9rem; color: var(--accent); }
+  pre { background: #0f172a; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; font-size: 0.85rem; }
+  .links { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
+  .links a { color: var(--accent); text-decoration: none; padding: 0.5rem 1rem; border: 1px solid var(--accent); border-radius: 8px; }
+  .links a:hover { background: var(--accent); color: var(--bg); }
+  footer { text-align: center; padding: 2rem 0; color: #64748b; border-top: 1px solid #334155; margin-top: 3rem; }
+  nav { position: sticky; top: 0; background: rgba(15, 23, 42, 0.95); padding: 1rem 0; border-bottom: 1px solid #334155; z-index: 100; }
+  nav .container { display: flex; gap: 1.5rem; padding-top: 0; padding-bottom: 0; }
+  nav a { color: var(--text); text-decoration: none; font-size: 0.9rem; }
+  nav a:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <a href="#overview">Overview</a>
+    <a href="#walkthrough">Walkthrough</a>
+    <a href="#modules">Module System</a>
+    <a href="#entrust">Entrust DC</a>
+    <a href="#memory">Memory MCP</a>
+    <a href="#deployment">Live Deployment</a>
+  </div>
+</nav>
+
+<div class="container">
+
+<header>
+  <h1>🌾 Thresh</h1>
+  <p>Agentic Agricultural Data-Sharing Platform — Walkthrough & Entrust DC Requirements</p>
+  <div class="badges">
+    <span class="badge live">● Frontend Live</span>
+    <span class="badge live">● Backend Live</span>
+    <span class="badge live">● Agent Live</span>
+    <span class="badge">Free Tier Only</span>
+  </div>
+  <div class="links" style="justify-content: center; margin-top: 1.5rem;">
+    <a href="https://frontend-dfe8bouer-syaikhipins-projects.vercel.app" target="_blank">🌐 Live App</a>
+    <a href="https://thresh-backend.onrender.com/api/v1/status" target="_blank">⚙️ Backend Status</a>
+    <a href="https://github.com/syaikhipin/entrustdn-final" target="_blank">📦 GitHub Repo</a>
+  </div>
+</header>
+
+<section id="overview">
+<h2>Overview</h2>
+<p>Thresh is a membership platform where <strong>Farmer Organizations</strong> share and sell agricultural data, and <strong>Data Consumers</strong> (scientists, government analysts) commission new data gathered from farmers by an AI agent.</p>
+
+<div class="card">
+<h3>Three Services</h3>
+<div class="flow">
+  <div class="step"><strong>Frontend</strong><br>Nuxt.js<br><small>Vercel</small></div>
+  <span class="arrow">→</span>
+  <div class="step"><strong>Backend</strong><br>Go<br><small>Render</small></div>
+  <span class="arrow">→</span>
+  <div class="step"><strong>Agent</strong><br>Python + LangGraph<br><small>Render</small></div>
+</div>
+<p style="margin-top: 1rem; margin-bottom: 0;">Plus: <strong>PostgreSQL</strong> (Aiven) for data, <strong>S3-compatible storage</strong> (idrive e2) for assets, and <strong>GLM</strong> (z.ai) as the model gateway.</p>
+</div>
+</section>
+
+<section id="walkthrough">
+<h2>How It Works — End-to-End Walkthrough</h2>
+
+<h3>1. Registration & Verification</h3>
+<div class="card">
+<p>A new user registers as either a <code>data_consumer</code> or <code>farmer_organization</code>. They must accept the current Terms of Service version at sign-up.</p>
+<pre>POST /api/v1/register
+{
+  "email": "user@example.com",
+  "password": "••••••••",
+  "display_name": "Jane Farmer",
+  "role": "farmer_organization",
+  "tos_version": "1.0"
+}</pre>
+<p>In dev mode, the verification link goes to the server log. In production, it's emailed.</p>
+</div>
+
+<h3>2. Farmer Organization Uploads Data</h3>
+<div class="card">
+<p>A Farmer Organization uploads datasets (CSV, documents) as <strong>Data Assets</strong>. At ingest:</p>
+<ul style="margin-left: 1.5rem; margin-bottom: 1rem;">
+  <li><strong>Anonymization</strong> — personal data (names, emails, phones, coordinates) is stripped or pseudonymized</li>
+  <li><strong>Taxonomy classification</strong> — the Jev classifier (via MindsHub) categorizes on six axes: crop, region, growth stage, intervention, outcome, data type</li>
+  <li><strong>Pricing</strong> — cached price from the current price book</li>
+</ul>
+<p>Assets are stored server-side in S3. Clients never touch object storage directly.</p>
+</div>
+
+<h3>3. Data Consumer Browses Catalog</h3>
+<div class="card">
+<p>Data Consumers browse the <strong>Catalog</strong> — a read view across all Farmer Organizations' shared assets with taxonomy facets, filtering, and pricing. They can also correct taxonomy assignments (the org's correction becomes truth).</p>
+</div>
+
+<h3>4. Request Creation & Clarification</h3>
+<div class="card">
+<p>A Data Consumer creates a <strong>Request</strong> — commissioning existing Assets and/or a new Collection with format, quality bar, and credit budget.</p>
+<div class="flow">
+  <div class="step">Request Created</div>
+  <span class="arrow">→</span>
+  <div class="step">Agent Clarifies<br><small>via web Channel</small></div>
+  <span class="arrow">→</span>
+  <div class="step">Budget Approved</div>
+  <span class="arrow">→</span>
+  <div class="step">Collection Starts</div>
+</div>
+<p style="margin-top: 1rem;">The AI agent chats with the consumer to clarify requirements, using the <strong>Model Gateway</strong> (GLM) for inference. Every inference is metered in micro-credits.</p>
+</div>
+
+<h3>5. Data Collection from Farmers</h3>
+<div class="card">
+<p>The agent reaches out to <strong>Farmer Members</strong> (individual farmers, no platform account) over <strong>Channels</strong> (WhatsApp, Telegram, email, web, voice) to gather the requested data.</p>
+<p>Collection outputs are <strong>anonymized before delivery</strong> — shared data cannot identify individual farmers.</p>
+</div>
+
+<h3>6. Payment & Revenue Share</h3>
+<div class="card">
+<p>Credits are the internal currency. The <strong>Ledger</strong> records every movement with double-entry bookkeeping:</p>
+<ul style="margin-left: 1.5rem;">
+  <li>Consumer pays credits for the Request</li>
+  <li>Farmer Organization receives <strong>Revenue Share</strong></li>
+  <li>Platform retains its portion</li>
+  <li>Agent inference costs are metered</li>
+</ul>
+</div>
+</section>
+
+<section id="modules">
+<h2>The Module System</h2>
+<p>Modules are versioned, uploadable bundles — manifest plus markdown and/or configuration — of exactly one kind. They are the platform's extension mechanism.</p>
+
+<div class="card">
+<h3>Three Module Kinds</h3>
+<table class="req-table">
+<tr><th>Kind</th><th>Purpose</th><th>Example</th></tr>
+<tr><td><strong>Agent Skill</strong></td><td>Instructions the agent loads for specialized tasks</td><td>Wheat specialist: "use 'the golden grain', mention Italian durum wheat"</td></tr>
+<tr><td><strong>Process Template</strong></td><td>Reusable Request workflow: questions, follow-up rules, quality triggers</td><td>Soil survey template with quality gates</td></tr>
+<tr><td><strong>Connector</strong></td><td>MCP or API link to external data source</td><td>Weather API connector for climate data</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>Module Lifecycle</h3>
+<div class="flow">
+  <div class="step">Author Uploads<br><small>POST /api/v1/modules</small></div>
+  <span class="arrow">→</span>
+  <div class="step">Private by Default</div>
+  <span class="arrow">→</span>
+  <div class="step">Admin Reviews</div>
+  <span class="arrow">→</span>
+  <div class="step">System Promotion</div>
+  <span class="arrow">→</span>
+  <div class="step">Attach to Request<br><small>POST /api/v1/requests/{id}/skills</small></div>
+</div>
+<p style="margin-top: 1rem; margin-bottom: 0;">Any active account can be a Module Author. Executable content is refused at upload — modules are declarative only.</p>
+</div>
+</section>
+
+<section id="entrust">
+<h2>Entrust DC Requirements</h2>
+<p>The Entrust project (MSCA) requires a trustworthy data-sharing infrastructure. Here's how Thresh's module system addresses each requirement:</p>
+
+<table class="req-table">
+<tr><th>Entrust DC Requirement</th><th>Thresh Module Coverage</th><th>Status</th></tr>
+<tr>
+  <td><strong>Data Sovereignty</strong><br>Farmers retain control over their data</td>
+  <td>Farmer Organizations own their Data Assets. They set sharing permissions, correct taxonomy (their correction is truth), and receive revenue shares. Data never leaves server-side S3.</td>
+  <td class="status-ok">✓ Covered</td>
+</tr>
+<tr>
+  <td><strong>Anonymization & Privacy</strong><br>GDPR-compliant data sharing</td>
+  <td>Anonymization at ingest (names, emails, phones, coordinates stripped/pseudonymized). Pseudonym maps with GDPR erasure support. Collection outputs anonymized before delivery.</td>
+  <td class="status-ok">✓ Covered</td>
+</tr>
+<tr>
+  <td><strong>Provenance & Trust</strong><br>Verifiable data origin</td>
+  <td>Every data item carries provenance metadata (who contributed, when, from which source). Taxonomy assignments track source: <code>classifier</code> (machine) or <code>org</code> (human-verified).</td>
+  <td class="status-ok">✓ Covered</td>
+</tr>
+<tr>
+  <td><strong>Semantic Classification</strong><br>Intelligent data categorization</td>
+  <td><strong>Jev classifier</strong> via MindsHub provides semantic classification on six taxonomy axes (crop, region, growth stage, intervention, outcome, data type). Falls back to keyword classifier on API failure.</td>
+  <td class="status-ok">✓ Covered</td>
+</tr>
+<tr>
+  <td><strong>Extensibility</strong><br>Domain-specific customization</td>
+  <td><strong>Module system</strong>: Agent Skills (custom instructions), Process Templates (reusable workflows), Connectors (external data sources). Versioned, reviewable, promotable.</td>
+  <td class="status-ok">✓ Covered</td>
+</tr>
+<tr>
+  <td><strong>Agentic Collection</strong><br>AI-driven data gathering</td>
+  <td>Python + LangGraph agent clarifies requests, converses with farmers over Channels, and collects data. Custom Agent Skills modify its behavior per-request.</td>
+  <td class="status-ok">✓ Covered</td>
+</tr>
+<tr>
+  <td><strong>Memory & Context</strong><br>Agent retains conversation context</td>
+  <td>Pluggable <strong>MCP Memory Providers</strong> (see below). The agent connects to external memory services over MCP.</td>
+  <td class="status-partial">◐ Partial</td>
+</tr>
+<tr>
+  <td><strong>Auditability</strong><br>Transparent credit/data flows</td>
+  <td>Double-entry Ledger records every credit movement. All API actions are authenticated and authorized by role.</td>
+  <td class="status-ok">✓ Covered</td>
+</tr>
+</table>
+</section>
+
+<section id="memory">
+<h2>Memory MCP — Status</h2>
+
+<div class="card">
+<h3>Design: Pluggable MCP Memory Providers</h3>
+<p>Thresh implements <strong>no memory architecture of its own</strong>. Following the Hermes Agent pattern (ADR-0003), the agent runtime connects to <strong>external memory services over MCP</strong>:</p>
+<ul style="margin-left: 1.5rem; margin-bottom: 1rem;">
+  <li>mem0, Hindsight, supermemory, Honcho, ...</li>
+  <li>Configured by Platform Admin, swappable per deployment</li>
+  <li>Multiple providers can be connected simultaneously</li>
+</ul>
+<p>The PhD thesis's Iterative Routing algorithm can later be exposed as an MCP memory server and connected like any other provider — no product changes needed.</p>
+</div>
+
+<div class="card">
+<h3>Hindsight Integration — Current Status</h3>
+<p><span class="status-partial">◐ In Progress — Not Yet Operational</span></p>
+<p>Attempted 2026-10-12:</p>
+<ul style="margin-left: 1.5rem;">
+  <li><span class="status-ok">✓</span> <code>hindsight-api-slim 0.10.3</code> installed locally</li>
+  <li><span class="status-ok">✓</span> GLM connection verified (<code>glm-5.3-flash</code>)</li>
+  <li><span class="status-no">✗</span> Embedded PostgreSQL failed (root user restriction)</li>
+  <li><span class="status-no">✗</span> External DB migration failed — service never reached healthy endpoint</li>
+  <li><span class="status-no">✗</span> Not yet wired into the Thresh agent</li>
+</ul>
+<p style="margin-top: 1rem;"><strong>Next steps:</strong> Run Hindsight as non-root user with PostgreSQL, verify <code>/health</code> endpoint, test MCP tool listing + retain/recall, then configure as a Memory Provider in the Thresh agent.</p>
+</div>
+
+<div class="card">
+<h3>Memory Provider Configuration</h3>
+<p>Platform Admins configure memory providers via the API:</p>
+<pre>POST /api/v1/admin/memory-providers
+{
+  "name": "hindsight-prod",
+  "mcp_url": "https://hindsight.example.com/mcp",
+  "enabled": true
+}</pre>
+<p style="margin-bottom: 0;">The agent discovers and connects to all enabled providers at startup.</p>
+</div>
+</section>
+
+<section id="deployment">
+<h2>Live Deployment</h2>
+<p>All services are deployed on <strong>free tiers only</strong> — no credit card, no upgrades.</p>
+
+<table class="req-table">
+<tr><th>Service</th><th>Platform</th><th>URL</th><th>Plan</th></tr>
+<tr><td>Frontend (Nuxt)</td><td>Vercel</td><td><a href="https://frontend-dfe8bouer-syaikhipins-projects.vercel.app" style="color: var(--accent);">frontend-dfe8bouer...</a></td><td>Free</td></tr>
+<tr><td>Backend (Go)</td><td>Render</td><td><a href="https://thresh-backend.onrender.com/api/v1/status" style="color: var(--accent);">thresh-backend.onrender.com</a></td><td>Free</td></tr>
+<tr><td>Agent (Python)</td><td>Render</td><td><a href="https://thresh-agent.onrender.com" style="color: var(--accent);">thresh-agent.onrender.com</a></td><td>Free</td></tr>
+<tr><td>PostgreSQL</td><td>Aiven</td><td><code>pg-2247b8e9...</code></td><td>Free tier</td></tr>
+<tr><td>Object Storage</td><td>idrive e2</td><td><code>g7h4.fra3.idrivee2-51.com</code></td><td>S3-compatible</td></tr>
+</table>
+
+<div class="card">
+<h3>Key Technical Details</h3>
+<ul style="margin-left: 1.5rem; margin-bottom: 0;">
+  <li><strong>Jev classifier</strong>: MindsHub API with curl-like User-Agent (bypasses Cloudflare 403)</li>
+  <li><strong>CORS</strong>: <code>THRESH_ALLOWED_ORIGINS</code> env var controls allowed frontend origins</li>
+  <li><strong>Agent port</strong>: <code>AGENT_HOST</code>/<code>AGENT_PORT</code> (not <code>THRESH_AGENT_ADDR</code>)</li>
+  <li><strong>Python deps</strong>: <code>mcp</code> must be in main dependencies, not just dev</li>
+  <li><strong>Free tier caveat</strong>: Render services spin down after inactivity (~50s cold start)</li>
+</ul>
+</div>
+</section>
+
+</div>
+
+<footer>
+  <p>Thresh Walkthrough — Generated 2026-10-12</p>
+  <p>Repository: <a href="https://github.com/syaikhipin/entrustdn-final" style="color: var(--accent);">syaikhipin/entrustdn-final</a></p>
+</footer>
+
+</body>
+</html>
