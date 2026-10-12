@@ -12,6 +12,25 @@ Agentic agricultural data-sharing platform. Monorepo, three services:
 
 Domain vocabulary: `CONTEXT.md`. Decisions: `docs/adr/`.
 
+## Business Process Showcase
+
+Animated demos of each business process, captured from the live deployment:
+
+### 1. User Registration
+![Registration](docs/gifs/thresh_registration_demo.gif)
+
+### 2. User Login
+![Login](docs/gifs/thresh_login_demo.gif)
+
+### 3. Hindsight Memory Integration
+![Hindsight Memory](docs/gifs/hindsight_memory.gif)
+
+### 4. Multi-Organization Data Flow
+![Multi-org Data](docs/gifs/multiorg_data.gif)
+
+### 5. Custom Skills
+![Custom Skills](docs/gifs/custom_skills.gif)
+
 ## Quick start
 
 ```bash
