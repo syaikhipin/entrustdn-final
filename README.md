@@ -1,5 +1,12 @@
 # Thresh
 
+<div align="center">
+  <a href="https://entrustdn.eu"><img src="https://entrustdn.eu/wp-content/uploads/2023/02/logo.svg" alt="EntrustDN" height="80"></a>
+  <br><br>
+  **EntrustDN Project** — Trustworthy Data Sharing Infrastructure for Agricultural Research<br>
+  📋 Work Package 1 &nbsp;|&nbsp; 🎓 [UNIPA](https://www.unipa.it) &nbsp;|&nbsp; 🇪🇺 [EU Commission](https://commission.europa.eu) &nbsp;|&nbsp; 🔬 [MSCA](https://marie-sklodowska-curie-actions.ec.europa.eu)
+</div>
+
 Agentic agricultural data-sharing platform. Monorepo, three services:
 
 - **`backend/`** — Go. The system of record: membership, catalog, Requests,
