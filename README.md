@@ -43,6 +43,9 @@ Domain vocabulary: `CONTEXT.md`. Decisions: `docs/adr/`.
 ### System Status
 ![Status](docs/gifs/system_status.gif)
 
+### Price Book (Admin)
+![Price Book](docs/gifs/real_pricebook.gif)
+
 ### 🎨 Process Illustrations
 
 ### Data Upload Flow
