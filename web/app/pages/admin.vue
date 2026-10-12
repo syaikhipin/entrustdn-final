@@ -818,7 +818,7 @@ async function submitDeleteTerm(t: Term) {
         <p class="hint">
           The agent recalls what earlier conversations established before it
           re-asks a consumer. Register the recall services here — mem0,
-          Hindsight, supermemory, or any MCP-speaking provider. Connection
+          Any MCP-speaking memory provider. Connection
           facts only: name and endpoint; the agent authenticates with none.
           At most five.
         </p>

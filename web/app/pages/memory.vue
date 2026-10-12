@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Memory: Hindsight MCP integration status. Shows configured memory
+// Memory: long-term agent memory status. Shows configured memory
 // providers and explains how the agent recalls/stores context.
 import { fetchMemoryProviders, type MemoryProvider } from "~/memory";
 import { useSession } from "~/composables/useSession";
@@ -30,7 +30,7 @@ async function load() {
 <template>
   <div class="mx-auto max-w-4xl px-4 py-8">
     <h1 class="text-3xl font-bold mb-2">🧠 Agent Memory</h1>
-    <p class="text-gray-600 mb-6">The agent retains conversation context via pluggable MCP Memory Providers. Powered by Hindsight Cloud.</p>
+    <p class="text-gray-600 mb-6">The agent retains conversation context via pluggable MCP Memory Providers. </p>
 
     <div v-if="!ready" class="text-gray-500">Loading…</div>
     <div v-else>
@@ -40,7 +40,7 @@ async function load() {
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div class="border rounded-lg p-4 bg-purple-50">
           <h3 class="font-semibold mb-2">📥 Recall (before responding)</h3>
-          <p class="text-sm">On every clarify turn, the agent queries Hindsight with your message. Relevant memories are injected into the model's context — so it remembers your preferences across sessions.</p>
+          <p class="text-sm">On every clarify turn, the agent queries long-term memory with your message. Relevant memories are injected into the model's context — so it remembers your preferences across sessions.</p>
           <code class="text-xs bg-gray-100 p-1 rounded mt-2 block">recall(query, limit=5) → [{text, score}]</code>
         </div>
         <div class="border rounded-lg p-4 bg-green-50">
@@ -67,7 +67,7 @@ async function load() {
 
       <!-- Degradation note -->
       <div class="mt-6 text-sm text-gray-600 border-l-4 border-yellow-400 pl-4">
-        <strong>Graceful degradation:</strong> If Hindsight is down or slow, the agent continues without memory — recall returns empty, never breaks the turn.
+        <strong>Graceful degradation:</strong> If the memory service is down or slow, the agent continues without memory — recall returns empty, never breaks the turn.
       </div>
     </div>
   </div>
