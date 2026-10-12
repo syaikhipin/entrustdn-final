@@ -22,8 +22,8 @@ Animated demos of each business process, captured from the live deployment:
 ### 2. User Login
 ![Login](docs/gifs/thresh_login_demo.gif)
 
-### 3. Hindsight Memory Integration
-![Hindsight Memory](docs/gifs/hindsight_memory.gif)
+### 3. Long-Term Agent Memory
+![Agent Memory](docs/gifs/agent_memory.gif)
 
 ### 4. Multi-Organization Data Flow
 ![Multi-org Data](docs/gifs/multiorg_data.gif)
