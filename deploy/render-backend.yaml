@@ -4,10 +4,10 @@
 
 services:
   - type: web
-    name: thresh-backend
+    name: thresh-backend-eu
     runtime: go
     plan: free
-    region: oregon
+    region: frankfurt
     buildCommand: go build -o /opt/render/project/src/server ./cmd/api
     startCommand: /opt/render/project/src/server
     healthCheckPath: /api/v1/status
@@ -16,8 +16,8 @@ services:
         sync: false  # Set manually: postgres://user:pass@host:port/db?sslmode=require
       - key: THRESH_ALLOWED_ORIGINS
         value: https://frontend-sooty-one-6c2l65azaf.vercel.app
-      - key: THRESH_AGENT_URL
-        value: https://thresh-agent.onrender.com
+      - key: AGENT_BASE_URL
+        value: https://thresh-agent-eu.onrender.com
       - key: S3_ENDPOINT
         sync: false
       - key: S3_REGION

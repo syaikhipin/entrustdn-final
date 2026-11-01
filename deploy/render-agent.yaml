@@ -3,12 +3,12 @@
 
 services:
   - type: web
-    name: thresh-agent
+    name: thresh-agent-eu
     runtime: python
     plan: free
-    region: oregon
+    region: frankfurt
     buildCommand: pip install -e . && pip install "mcp>=1.2"
-    startCommand: uvicorn thresh_agent.app:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn --factory thresh_agent.app:create_app --host 0.0.0.0 --port $PORT
     rootDir: agent
     envVars:
       - key: AGENT_HOST

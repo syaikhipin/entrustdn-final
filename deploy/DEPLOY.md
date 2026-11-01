@@ -46,7 +46,7 @@ Deploy the full stack in ~15 minutes. All services stay on free tiers.
    |----------|-------|
    | `DATABASE_URL` | `postgres://user:pass@host:port/db?sslmode=require` |
    | `THRESH_ALLOWED_ORIGINS` | `https://your-frontend.vercel.app` |
-   | `THRESH_AGENT_URL` | `https://thresh-agent.onrender.com` |
+   | `AGENT_BASE_URL` | `https://thresh-agent-eu.onrender.com` |
    | `S3_ENDPOINT` | `https://xxx.idrivee2-xx.com` |
    | `S3_REGION` | `eu-central-2` |
    | `S3_BUCKET` | `your-bucket` |
@@ -55,7 +55,7 @@ Deploy the full stack in ~15 minutes. All services stay on free tiers.
    | `THRESH_ADMIN_EMAIL` | `admin@example.com` |
    | `THRESH_ADMIN_PASSWORD` | `choose-a-password` |
 5. Click **Create Web Service**
-6. Wait ~2 min → verify `https://thresh-backend.onrender.com/api/v1/status` returns 200
+6. Wait ~2 min → verify `https://thresh-backend-eu.onrender.com/api/v1/status` returns 200
 
 ## Step 2: Agent (Python) on Render
 
@@ -89,7 +89,7 @@ Deploy the full stack in ~15 minutes. All services stay on free tiers.
    - **Root Directory:** `web`
    - **Build Command:** `npm run build`
 4. Add environment variable:
-   - `NUXT_PUBLIC_BACKEND_BASE_URL` = `https://thresh-backend.onrender.com`
+   - `NUXT_PUBLIC_BACKEND_BASE_URL` = `https://thresh-backend-eu.onrender.com`
 5. Click **Deploy**
 6. After deploy, copy your Vercel URL (e.g., `https://your-app.vercel.app`)
 7. **Go back to Render** → backend service → update `THRESH_ALLOWED_ORIGINS` to include your Vercel URL → redeploy
@@ -98,12 +98,12 @@ Deploy the full stack in ~15 minutes. All services stay on free tiers.
 
 ```bash
 # Get admin token
-TOKEN=$(curl -s -X POST https://thresh-backend.onrender.com/api/v1/login \
+TOKEN=$(curl -s -X POST https://thresh-backend-eu.onrender.com/api/v1/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"your-password"}' | jq -r .token)
 
 # Register Hindsight
-curl -X POST https://thresh-backend.onrender.com/api/v1/admin/memory-providers \
+curl -X POST https://thresh-backend-eu.onrender.com/api/v1/admin/memory-providers \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"hindsight-prod","endpoint":"https://api.hindsight.vectorize.io/mcp"}'
@@ -113,7 +113,7 @@ curl -X POST https://thresh-backend.onrender.com/api/v1/admin/memory-providers \
 
 ```bash
 # Backend + agent health
-curl https://thresh-backend.onrender.com/api/v1/status
+curl https://thresh-backend-eu.onrender.com/api/v1/status
 
 # Should return: {"backend": "ok", "agent": "reachable", ...}
 ```
